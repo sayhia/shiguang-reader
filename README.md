@@ -27,13 +27,25 @@
 
 ## 安装
 
-这是一个本地 Cordis 插件，通过 workspace `link:` 安装到 DSH profile：
+### 在线安装（推荐）
+
+GitHub：[sayhia/shiguang-reader](https://github.com/sayhia/shiguang-reader)
+
+在 DeepSeek Harness 的 **设置 → 插件** 中安装以下 Bundle：
+
+```text
+github:sayhia/shiguang-reader
+```
+
+也可以用插件管理器直接安装同一个 spec。安装完成后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」；如果插件列表里还没启用，手动打开「拾光阅读」即可。
+
+### 本地开发
 
 ```bash
 dsh plugin --profile desktop add link:/path/to/shiguang-reader
 ```
 
-安装后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」。
+适合改源码时使用；正式使用建议用上面的 GitHub 在线安装。
 
 ## 数据
 
