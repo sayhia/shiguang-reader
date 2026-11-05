@@ -81,7 +81,7 @@ npm test        # 客户端 + 宿主测试
 首次启用需要在 GitHub 仓库添加 Actions secret：
 
 ```text
-NPM_TOKEN = 有 publish 权限、并允许绕过 2FA 的 npm Granular Access Token
+NPMJS_TOKEN = 有 publish 权限、并允许绕过 2FA 的 npm Granular Access Token
 ```
 
 之后发布新版本：
