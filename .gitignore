@@ -1,0 +1,8 @@
+.DS_Store
+.dev-watch.log
+.dev-watch.pid
+node_modules/
+dist/
+package/
+.workbuddy/
+parse-worker.js
