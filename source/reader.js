@@ -298,6 +298,42 @@
         }
       }, []);
 
+      useEffect(function collapseHostRightbarOnReaderMount() {
+        if (typeof layoutService !== 'undefined' && layoutService && typeof layoutService.closeRightbar === 'function') {
+          try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
+        }
+      }, []);
+
+      useEffect(function bindWheelSwipe() {
+        const element = stageRef.current;
+        if (!element || typeof element.addEventListener !== 'function') return undefined;
+        let deltaAccum = 0;
+        let lastSwipe = 0;
+        function onWheel(event) {
+          if (event.ctrlKey || event.metaKey) return;
+          const dx = Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+            ? event.deltaX
+            : (event.shiftKey ? event.deltaY : 0);
+          if (Math.abs(dx) < 2) return;
+          deltaAccum += dx;
+          const now = Date.now();
+          if (Math.abs(deltaAccum) >= 42 && (now - lastSwipe) > 320) {
+            if (deltaAccum > 0) {
+              nextPage();
+            } else {
+              prevPage();
+            }
+            lastSwipe = now;
+            deltaAccum = 0;
+            if (event.cancelable) event.preventDefault();
+          }
+        }
+        element.addEventListener('wheel', onWheel, { passive: false });
+        return function unbind() {
+          element.removeEventListener('wheel', onWheel);
+        };
+      }, [nextPage, prevPage]);
+
       useEffect(function watchSystemTheme() {
         if (typeof window === 'undefined' || !window.matchMedia) return;
         const query = window.matchMedia('(prefers-color-scheme: dark)');
@@ -1135,11 +1171,13 @@
             return h('p', { key: index, 'data-p': index, className: 'sr-figure-missing' },
               t('imageMissing', { name: picture.name }));
           }
-          const verse = text.indexOf('\n') >= 0 && text.trim().charAt(0) === '《';
+          const trimmed = text.trim();
+          const verse = text.indexOf('\n') >= 0 && (trimmed.charAt(0) === '《' || trimmed.startsWith('诗') || trimmed.startsWith('——'));
+          const quote = trimmed.length > 20 && ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('「') && trimmed.endsWith('」')) || (trimmed.startsWith('『') && trimmed.endsWith('』')));
           return h('p', {
             key: index,
             'data-p': index,
-            className: verse ? 'sr-verse' : undefined,
+            className: verse ? 'sr-verse' : (quote ? 'sr-quote' : undefined),
           }, segmentParagraph(text, offsets.offsets[index], chapterHighlights));
         });
       }, [chapter.id, chapter.paragraphs, chapter.images, chapterHighlights, offsets]);
@@ -2050,6 +2088,14 @@
           ),
         ),
         h('div', { className: 'sr-page-area' },
+          h('button', {
+            type: 'button',
+            className: 'sr-page-edge sr-page-edge--prev',
+            'aria-label': t('prevPage'),
+            title: t('prevPage'),
+            disabled: page <= 0 && chapterIndex <= 0,
+            onClick: function prev(e) { e.stopPropagation(); prevPage(); },
+          }, h(Icon, { name: 'chevron-left', size: 18 })),
           h('div', {
             className: 'sr-stage',
             ref: stageRef,
@@ -2088,6 +2134,14 @@
               ),
             ),
           ),
+          h('button', {
+            type: 'button',
+            className: 'sr-page-edge sr-page-edge--next',
+            'aria-label': t('nextPage'),
+            title: t('nextPage'),
+            disabled: page >= pageCount - 1 && chapterIndex >= chapters.length - 1,
+            onClick: function next(e) { e.stopPropagation(); nextPage(); },
+          }, h(Icon, { name: 'chevron-right', size: 18 })),
         ),
         !chrome ? h('div', { className: 'sr-page-meta' }, clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel) : null,
         h('div', { className: 'sr-reader-bottom' + (chrome ? '' : ' is-hidden') },

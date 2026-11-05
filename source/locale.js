@@ -1470,6 +1470,7 @@
 
     const EMPTY_LOCALE_SNAPSHOT = { active: 'zh', locales: [], revision: 0 };
     let localeService = null;
+    let layoutService = null;
 
     // Shared `{name}` interpolation so translate() and fill() behave the same.
     function interpolate(template, params) {
