@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@local/shiguang-reader',
+  id: 'shiguang-reader',
   factory(require) {
     const React = require('react');
     const h = React.createElement;

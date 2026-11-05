@@ -31,13 +31,20 @@
 
 GitHub：[sayhia/shiguang-reader](https://github.com/sayhia/shiguang-reader)
 
-在 DeepSeek Harness 的 **设置 → 插件** 中安装以下 Bundle：
+在 DeepSeek Harness 的 **设置 → 插件** 中安装 Bundle，二选一：
 
 ```text
+shiguang-reader
 github:sayhia/shiguang-reader
 ```
 
-也可以用插件管理器直接安装同一个 spec。安装完成后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」；如果插件列表里还没启用，手动打开「拾光阅读」即可。
+`shiguang-reader` 来自 npm；GitHub spec 适合直接跟随仓库最新提交。安装完成后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」；如果插件列表里还没启用，手动打开「拾光阅读」即可。
+
+也可以直接安装 npm 包：
+
+```bash
+npm install shiguang-reader
+```
 
 ### 本地开发
 

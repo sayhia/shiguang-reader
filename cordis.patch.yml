@@ -5,7 +5,7 @@
 # the store, and the client mirrors into it on every save.
 - insert:
     - id: shiguang-reader
-      name: '@local/shiguang-reader'
+      name: 'shiguang-reader'
 
 # Optional: set index: false to disable the host-side SQLite cache entirely.
 # The folder snapshot remains the source of truth in either mode.

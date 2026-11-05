@@ -20,7 +20,7 @@ const rjcBook = {
 const packageJson = JSON.parse(read('package.json'));
 const zhMeta = JSON.parse(read('locale/zh.json'));
 const enMeta = JSON.parse(read('locale/en.json'));
-assert.equal(packageJson.name, '@local/shiguang-reader');
+assert.equal(packageJson.name, 'shiguang-reader');
 assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml');
 assert.equal(packageJson.dsh.client.platform, 'web');
 assert.ok(zhMeta.meta.title && zhMeta.meta.description);
