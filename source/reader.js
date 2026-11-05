@@ -302,6 +302,22 @@
         if (typeof layoutService !== 'undefined' && layoutService && typeof layoutService.closeRightbar === 'function') {
           try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
         }
+        try {
+          const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
+          if (rightbar && rightbar.style) {
+            rightbar.style.setProperty('display', 'none', 'important');
+            rightbar.style.setProperty('width', '0', 'important');
+          }
+        } catch (error) { /* ignore */ }
+        return function restore() {
+          try {
+            const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
+            if (rightbar && rightbar.style) {
+              rightbar.style.removeProperty('display');
+              rightbar.style.removeProperty('width');
+            }
+          } catch (error) { /* ignore */ }
+        };
       }, []);
 
       useEffect(function bindWheelSwipe() {

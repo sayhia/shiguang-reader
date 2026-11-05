@@ -238,14 +238,9 @@
         if (scrollRef.current) scrollRef.current.scrollTop = 0;
       }, [tab]);
 
-      useEffect(function collapseHostRightbar() {
-        if (layoutService && typeof layoutService.closeRightbar === 'function') {
-          try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
-        }
-      }, []);
-
       useEffect(function collapseHostRightbarForReader() {
-        if (reader && layoutService && typeof layoutService.closeRightbar === 'function') {
+        if (!reader) return undefined;
+        if (layoutService && typeof layoutService.closeRightbar === 'function') {
           try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
         }
       }, [reader]);
@@ -2458,10 +2453,10 @@
         const locale = typeof ctx.get === 'function' ? ctx.get('locale') : undefined;
         localeService = locale || null;
         translate = makeTranslate(localeService);
-        const layout = (ctx && ctx.layout) || (typeof ctx.get === 'function' ? ctx.get('layout') : undefined);
-        layoutService = layout || null;
-        if (layoutService && typeof layoutService.closeRightbar === 'function') {
-          try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
+        try {
+          layoutService = (typeof ctx.get === 'function' ? ctx.get('layout') : null) || null;
+        } catch (error) {
+          layoutService = null;
         }
 
         if (localeService) {
