@@ -299,24 +299,68 @@
       }, []);
 
       useEffect(function collapseHostRightbarOnReaderMount() {
-        if (typeof layoutService !== 'undefined' && layoutService && typeof layoutService.closeRightbar === 'function') {
-          try { layoutService.closeRightbar(); } catch (error) { /* ignore */ }
+        let frameClean = null;
+        function enforceFullWidth() {
+          try {
+            const frame = document.querySelector('.PIRFFq_frame, [class*="_frame"]');
+            if (frame && frame.style) {
+              const current = frame.style.getPropertyValue('grid-template-columns');
+              if (current !== 'auto 1fr 0px') {
+                if (!frameClean) {
+                  const original = frame.style.gridTemplateColumns;
+                  frameClean = function restore() {
+                    if (original) frame.style.gridTemplateColumns = original;
+                    else frame.style.removeProperty('grid-template-columns');
+                  };
+                }
+                frame.style.setProperty('grid-template-columns', 'auto 1fr 0px', 'important');
+              }
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
+            if (rightbar && rightbar.style) {
+              rightbar.style.setProperty('display', 'none', 'important');
+              rightbar.style.setProperty('width', '0px', 'important');
+              rightbar.style.setProperty('min-width', '0px', 'important');
+              rightbar.style.setProperty('max-width', '0px', 'important');
+              rightbar.style.setProperty('visibility', 'hidden', 'important');
+              rightbar.style.setProperty('pointer-events', 'none', 'important');
+            }
+          } catch (e) { /* ignore */ }
+
+          try {
+            const handle = document.querySelector('.PIRFFq_handle, [data-side="rightbar"]');
+            if (handle && handle.style) {
+              handle.style.setProperty('display', 'none', 'important');
+            }
+          } catch (e) { /* ignore */ }
         }
-        try {
-          const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
-          if (rightbar && rightbar.style) {
-            rightbar.style.setProperty('display', 'none', 'important');
-            rightbar.style.setProperty('width', '0', 'important');
-          }
-        } catch (error) { /* ignore */ }
-        return function restore() {
+
+        enforceFullWidth();
+        window.addEventListener('resize', enforceFullWidth);
+
+        return function cleanup() {
+          window.removeEventListener('resize', enforceFullWidth);
+          if (frameClean) frameClean();
           try {
             const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
             if (rightbar && rightbar.style) {
               rightbar.style.removeProperty('display');
               rightbar.style.removeProperty('width');
+              rightbar.style.removeProperty('min-width');
+              rightbar.style.removeProperty('max-width');
+              rightbar.style.removeProperty('visibility');
+              rightbar.style.removeProperty('pointer-events');
             }
-          } catch (error) { /* ignore */ }
+          } catch (e) { /* ignore */ }
+          try {
+            const handle = document.querySelector('.PIRFFq_handle, [data-side="rightbar"]');
+            if (handle && handle.style) {
+              handle.style.removeProperty('display');
+            }
+          } catch (e) { /* ignore */ }
         };
       }, []);
 
