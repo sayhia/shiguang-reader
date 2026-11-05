@@ -1,5 +1,7 @@
 # 拾光阅读 · Shiguang Reader
 
+[![npm version](https://img.shields.io/npm/v/shiguang-reader.svg)](https://www.npmjs.com/package/shiguang-reader)
+
 > 把世界关小一点，把书页放大一点。
 
 一个装进 DeepSeek Harness 的本地阅读插件：书架、沉浸式阅读、划线想法、书签、搜索、统计，都在同一个安静的面板里。
@@ -29,6 +31,7 @@
 
 ### 在线安装（推荐）
 
+npm：[shiguang-reader](https://www.npmjs.com/package/shiguang-reader)  
 GitHub：[sayhia/shiguang-reader](https://github.com/sayhia/shiguang-reader)
 
 在 DeepSeek Harness 的 **设置 → 插件** 中安装 Bundle，二选一：
