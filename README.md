@@ -74,6 +74,25 @@ npm test        # 客户端 + 宿主测试
 
 客户端源码在 `source/`，构建产物为 `client.js` 与 `parse-worker.js`。
 
+### 自动发布 npm
+
+`.github/workflows/publish.yml` 会在 push 到 `main` 时构建、跑测试，并只在版本号尚未发布时执行 `npm publish`。
+
+首次启用需要在 GitHub 仓库添加 Actions secret：
+
+```text
+NPM_TOKEN = 有 publish 权限、并允许绕过 2FA 的 npm Granular Access Token
+```
+
+之后发布新版本：
+
+```bash
+npm version patch
+git push origin main
+```
+
+已存在的版本会自动跳过，不会重复发布。
+
 ## 已知边界
 
 - 书库目录依赖 Chromium 的 File System Access API；Safari / Firefox 不支持导入。
