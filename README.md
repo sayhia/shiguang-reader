@@ -1,10 +1,11 @@
 # 拾光阅读 · Shiguang Reader
 
-[![npm version](https://img.shields.io/npm/v/shiguang-reader.svg)](https://www.npmjs.com/package/shiguang-reader)
+[![npm](https://img.shields.io/npm/v/shiguang-reader.svg)](https://www.npmjs.com/package/shiguang-reader)
+[![Publish npm package](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml/badge.svg)](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml)
 
 > 把世界关小一点，把书页放大一点。
 
-一个装进 DeepSeek Harness 的本地阅读插件：书架、沉浸式阅读、划线想法、书签、搜索、统计，都在同一个安静的面板里。
+装进 DeepSeek Harness 的本地阅读器：书架、沉浸式阅读、划线想法、书签、搜索和统计，都在同一个安静的面板里。
 
 ## 界面
 
@@ -14,48 +15,54 @@
 | **书籍详情** | **阅读统计** |
 | ![书籍详情](screenshots/book-detail.png) | ![阅读统计](screenshots/stats.png) |
 
-> 截图由真实 React 组件与生产 CSS 在无头 Chromium 中渲染，使用演示数据，不含 DSH 主界面外壳。
-
-## 功能
-
-- **阅读**：分页阅读、目录、章节进度、四套主题、字号/行距/页宽调节、全屏与语音朗读。
-- **笔记**：划线、想法、四种颜色、标签、书签、书评与摘录卡片。
-- **搜索**：书内搜索、跨书正文搜索、命中高亮与引用复制。
-- **书架**：封面/列表/分组视图，按最近阅读、进度、评分、字数排序；置顶、想读、搁置、已读完。
-- **批量操作**：多选后批量标记、搁置、打标签、置顶、复制/导出书单与删除。
-- **导入**：TXT / Markdown / EPUB，支持多选和拖拽；批量导入显示进度并逐本落盘。
-- **统计**：七日趋势、连续阅读、热力图、阅读节律、时长排行与月度卡片。
-- **宿主工具**：Agent 可直接跨书检索、读书、查笔记/书签/书架/统计。
+<sub>截图由真实 React 组件与生产 CSS 在无头 Chromium 中渲染，使用演示数据。</sub>
 
 ## 安装
 
-### 在线安装（推荐）
+### 在 Harness 中安装
 
-npm：[shiguang-reader](https://www.npmjs.com/package/shiguang-reader)  
-GitHub：[sayhia/shiguang-reader](https://github.com/sayhia/shiguang-reader)
-
-在 DeepSeek Harness 的 **设置 → 插件** 中安装 Bundle，二选一：
+打开 **设置 → 插件**，安装 Bundle：
 
 ```text
 shiguang-reader
+```
+
+也可以跟随 GitHub 最新提交：
+
+```text
 github:sayhia/shiguang-reader
 ```
 
-`shiguang-reader` 来自 npm；GitHub spec 适合直接跟随仓库最新提交。安装完成后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」；如果插件列表里还没启用，手动打开「拾光阅读」即可。
+安装后刷新 Web UI，点击左侧栏的书本图标「拾光阅读」。
 
-也可以直接安装 npm 包：
+### 直接安装 npm 包
 
 ```bash
 npm install shiguang-reader
 ```
 
-### 本地开发
+- npm：<https://www.npmjs.com/package/shiguang-reader>
+- GitHub：<https://github.com/sayhia/shiguang-reader>
 
-```bash
-dsh plugin --profile desktop add link:/path/to/shiguang-reader
-```
+### 第一次使用
 
-适合改源码时使用；正式使用建议用上面的 GitHub 在线安装。
+1. 点击「导入本地书」，选择 TXT / Markdown / EPUB。
+2. 首次导入会被要求选择一个**书库目录**；正文和原始 EPUB 都会保存在那里。
+3. 开始阅读、划线、写想法，数据自动保存。
+
+## 功能
+
+### 阅读
+分页阅读、目录与章节进度、纸张/月白/青瓷/夜间主题、字号/行距/页宽调节、全屏与语音朗读。
+
+### 笔记
+划线、想法、四种颜色、标签、书签、书评、摘录卡片；支持导出 Markdown、Obsidian Callout 与整本笔记。
+
+### 书架
+封面/列表/分组视图，按最近阅读、进度、评分、字数排序；置顶、想读、搁置、已读完；多选批量操作。
+
+### 搜索与统计
+书内搜索、跨书正文搜索、命中高亮、引用复制；七日趋势、连续阅读、热力图、阅读节律、时长排行与月度卡片。
 
 ## 数据
 
@@ -63,6 +70,18 @@ dsh plugin --profile desktop add link:/path/to/shiguang-reader
 - 浏览器只保存书架元数据、进度、笔记与设置。
 - SQLite 只做宿主侧的**派生检索索引**，可随时删除重建；设置 `index: false` 可完全关闭。
 - 不使用 `better-sqlite3`，SQLite 也不是主存储。
+
+## 宿主工具
+
+| 工具 | 用途 |
+|---|---|
+| `reading_search` | 跨书全文检索 |
+| `reading_book_read` | 读取目录和章节正文 |
+| `reading_notes` | 查询划线、想法与标签 |
+| `reading_bookmarks` | 查询书签与备注 |
+| `reading_shelf` | 查询书架、状态、评分与进度 |
+| `reading_stats` | 阅读统计、时长排行与目标 |
+| `reading_library_config` | 记住书库目录、查看索引状态 |
 
 ## 开发
 
@@ -74,24 +93,18 @@ npm test        # 客户端 + 宿主测试
 
 客户端源码在 `source/`，构建产物为 `client.js` 与 `parse-worker.js`。
 
-### 自动发布 npm
+本地开发也可以直接链接源码目录：
 
-`.github/workflows/publish.yml` 会在 push 到 `main` 时构建、跑测试，并只在版本号尚未发布时执行 `npm publish`。
-
-首次启用需要在 GitHub 仓库添加 Actions secret：
-
-```text
-NPMJS_TOKEN = 有 publish 权限、并允许绕过 2FA 的 npm Granular Access Token
+```bash
+dsh plugin --profile desktop add link:/path/to/shiguang-reader
 ```
 
-之后发布新版本：
+推送 `main` 时，GitHub Actions 会自动构建、跑测试，并在版本号尚未发布时推送 npm；已存在的版本自动跳过。
 
 ```bash
 npm version patch
 git push origin main
 ```
-
-已存在的版本会自动跳过，不会重复发布。
 
 ## 已知边界
 
