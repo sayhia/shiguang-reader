@@ -1663,6 +1663,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 }
 .sr-columns[data-font="sans"]{font-family:${UI_FONT};letter-spacing:var(--sr-letter-spacing,.02em);}
 .sr-columns[data-font="kai"]{font-family:"Kaiti SC","STKaiti","KaiTi","Noto Serif SC",serif;letter-spacing:calc(var(--sr-letter-spacing,.02em) + .02em);line-height:calc(var(--sr-line-height,1.95) * 1.03);}
+.sr-columns[data-font="dyslexic"]{font-family:"OpenDyslexic","Comic Sans MS","PingFang SC Medium",system-ui,sans-serif;letter-spacing:calc(var(--sr-letter-spacing,.02em) + .04em);word-spacing:.16em;line-height:calc(var(--sr-line-height,1.95) * 1.08);}
 .sr-columns[data-font="system"]{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:var(--sr-letter-spacing,.02em);}
 .sr-chapter-head{break-after:avoid;margin:0 0 1.45em;padding-bottom:1.15em;border-bottom:1px solid color-mix(in srgb,var(--sr-line) 65%,transparent);}
 .sr-chapter-kicker{
@@ -2435,6 +2436,8 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-card-theme[data-theme="paper"] .sr-card-theme-dot{background:#f0e3cd;}
 .sr-card-theme[data-theme="ink"] .sr-card-theme-dot{background:#20262a;}
 .sr-card-theme[data-theme="celadon"] .sr-card-theme-dot{background:#dde8dc;}
+.sr-card-theme[data-theme="sunset"] .sr-card-theme-dot{background:#f5decc;}
+.sr-card-theme[data-theme="forest"] .sr-card-theme-dot{background:#1e3025;}
 .sr-card-toggle{display:inline-flex;align-items:center;gap:5px;font-size:9.5px;color:var(--dsw-alias-label-secondary);cursor:pointer;}
 .sr-card-toggle input{width:12px;height:12px;accent-color:var(--dsw-alias-brand-primary);}
 .sr-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:12px;}

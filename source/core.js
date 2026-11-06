@@ -741,7 +741,7 @@
 
     function clampSettings(raw) {
       const value = raw && typeof raw === 'object' ? raw : {};
-      const themes = ['paper', 'snow', 'mint', 'night', 'auto'];
+      const themes = ['paper', 'candle', 'snow', 'mint', 'forest', 'night', 'oled', 'auto'];
       const widths = ['compact', 'comfortable', 'wide'];
       const letterValue = Number(value.letterSpacing);
       const paragraphValue = Number(value.paragraphSpacing);
@@ -749,7 +749,7 @@
         theme: themes.indexOf(value.theme) >= 0 ? value.theme : 'paper',
         fontSize: clamp(Number(value.fontSize) || FONT_SIZE_DEFAULT, FONT_SIZE_MIN, FONT_SIZE_MAX),
         lineHeight: clamp(Number(value.lineHeight) || 1.95, 1.5, 2.35),
-        fontFamily: ['serif', 'sans', 'kai', 'system'].indexOf(value.fontFamily) >= 0 ? value.fontFamily : 'serif',
+        fontFamily: ['serif', 'sans', 'kai', 'dyslexic', 'system'].indexOf(value.fontFamily) >= 0 ? value.fontFamily : 'serif',
         letterSpacing: clamp(Number.isFinite(letterValue) ? letterValue : 0.02, 0, 0.12),
         paragraphSpacing: clamp(Number.isFinite(paragraphValue) ? paragraphValue : 0.9, 0.5, 1.8),
         pageWidth: widths.indexOf(value.pageWidth) >= 0 ? value.pageWidth : 'comfortable',

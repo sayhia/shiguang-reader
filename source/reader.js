@@ -752,6 +752,17 @@
         return function cleanup() { window.clearTimeout(timer); };
       }, [settings.autoHideChrome, chrome, drawer, settingsOpen, noteDraft, toolbar, peek, page, chapterIndex]);
 
+      useEffect(function eyeCareTimer() {
+        const timer = setInterval(function checkRest() {
+          const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 60000);
+          if (elapsed > 0 && elapsed % 30 === 0 && sessionSecondsRef.current !== elapsed) {
+            sessionSecondsRef.current = elapsed;
+            props.showToast(fill(t('eyeCareReminderHint'), { n: elapsed }));
+          }
+        }, 60000);
+        return function cleanup() { clearInterval(timer); };
+      }, [props.showToast, t]);
+
       function suppressNextClick() {
         suppressClickRef.current = true;
         if (suppressTimerRef.current) window.clearTimeout(suppressTimerRef.current);
@@ -1803,6 +1814,7 @@
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'serif', onClick: function serif() { applySettings({ fontFamily: 'serif' }); }, style: { flex: 1 } }, t('fontSerif')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'sans', onClick: function sans() { applySettings({ fontFamily: 'sans' }); }, style: { flex: 1 } }, t('fontSans')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'kai', onClick: function kai() { applySettings({ fontFamily: 'kai' }); }, style: { flex: 1 } }, t('fontKai')),
+                h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'dyslexic', onClick: function dyslexic() { applySettings({ fontFamily: 'dyslexic' }); }, style: { flex: 1 } }, t('fontDyslexic')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'system', onClick: function system() { applySettings({ fontFamily: 'system' }); }, style: { flex: 1 } }, t('fontSystem')),
               ),
             ),

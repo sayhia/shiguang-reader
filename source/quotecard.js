@@ -40,6 +40,28 @@
         line: 'rgba(55,78,58,0.2)',
         glow: 'rgba(255,255,255,0.55)',
       },
+      {
+        id: 'sunset',
+        nameKey: 'cardThemeSunset',
+        bg: '#fbf3ea',
+        bgTo: '#f5decc',
+        ink: '#452b1a',
+        muted: '#8f684c',
+        accent: '#c96a3b',
+        line: 'rgba(120,62,25,0.22)',
+        glow: 'rgba(255,255,255,0.6)',
+      },
+      {
+        id: 'forest',
+        nameKey: 'cardThemeForest',
+        bg: '#142019',
+        bgTo: '#1e3025',
+        ink: '#d2e5d7',
+        muted: '#7e9c88',
+        accent: '#62ab7e',
+        line: 'rgba(195,214,204,0.2)',
+        glow: 'rgba(98,171,126,0.15)',
+      },
     ];
 
     const QUOTE_BREAK_BEFORE = '，。、；：？！）》」』”’…·,.;:?!)]}';
