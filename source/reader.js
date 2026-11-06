@@ -62,6 +62,7 @@
       const [toolbar, setToolbar] = useState(null);
       const [noteDraft, setNoteDraft] = useState(null);
       const [peek, setPeek] = useState(null);
+      const [footnote, setFootnote] = useState(null);
       const [selectionColor, setSelectionColor] = useState(null);
       const activeSelectionColor = selectionColor || settings.highlightColor || 'amber';
       const [bookmarkDraft, setBookmarkDraft] = useState(null);
@@ -89,7 +90,7 @@
       const [chapterHud, setChapterHud] = useState(null);
       const [pageJumpOpen, setPageJumpOpen] = useState(false);
       const [pageJumpDraft, setPageJumpDraft] = useState('');
-      const [rulerOpen, setRulerOpen] = useState(false);
+      const [rulerOpen, setRulerOpen] = useState(Boolean(settings.readingRuler));
       const [rulerY, setRulerY] = useState(160);
       const [jumpReturn, setJumpReturn] = useState(null);
       // A picture in the page is often too small to actually read — a scan, a map,
@@ -186,6 +187,7 @@
       const dismissPopovers = useCallback(function dismiss() {
         setToolbar(null);
         setPeek(null);
+        setFootnote(null);
         setFontQuickOpen(false);
         setPageJumpOpen(false);
       }, []);
@@ -402,6 +404,10 @@
           window.removeEventListener('resize', enforceFullWidth);
           if (frameClean) frameClean();
           try {
+            const frame = document.querySelector('.PIRFFq_frame, [class*="_frame"]');
+            if (frame && frame.style) frame.style.removeProperty('background');
+          } catch (e) { /* ignore */ }
+          try {
             const rightbar = document.querySelector('[data-rightbar-col], [class*="_rightbarCol"]');
             if (rightbar && rightbar.style) {
               rightbar.style.removeProperty('display');
@@ -416,6 +422,17 @@
             const handle = document.querySelector('.PIRFFq_handle, [data-side="rightbar"]');
             if (handle && handle.style) {
               handle.style.removeProperty('display');
+            }
+          } catch (e) { /* ignore */ }
+          try {
+            const app = document.querySelector('.sr-app');
+            if (app) {
+              app.style.removeProperty('background');
+              app.style.removeProperty('--sr-bg');
+            }
+            const centerCol = document.querySelector('[class*="_centerCol"]');
+            if (centerCol) {
+              centerCol.style.removeProperty('background');
             }
           } catch (e) { /* ignore */ }
         };
@@ -591,7 +608,7 @@
             if (settingsOpen) { setSettingsOpen(false); return; }
             if (fontQuickOpen) { setFontQuickOpen(false); return; }
             if (drawer) { setDrawer(null); return; }
-            if (toolbar || peek) { dismissPopovers(); return; }
+            if (toolbar || peek || footnote) { dismissPopovers(); return; }
             if (!chrome) { setChrome(true); return; }
             props.onExit();
             return;
@@ -606,11 +623,10 @@
             if (plainKey === 'f') { event.preventDefault(); toggleFullscreen(); return; }
             if (plainKey === 'l') {
               event.preventDefault();
-              setRulerOpen(function toggle(prev) {
-                const next = !prev;
-                props.showToast(next ? t('rulerOn') : t('rulerOff'));
-                return next;
-              });
+              const next = !(settings.readingRuler || rulerOpen);
+              setRulerOpen(next);
+              applySettings({ readingRuler: next });
+              props.showToast(next ? t('rulerOn') : t('rulerOff'));
               return;
             }
             if (plainKey === 'g') {
@@ -746,18 +762,25 @@
         }
       }, [chapterIndex, chapters, page, pageCount]);
 
-      useEffect(function syncAppThemeBackground() {
-        if (!readerRef.current) return;
-        const app = readerRef.current.closest('.sr-app');
-        if (app) {
-          app.style.setProperty('--sr-bg', currentTheme.bg, 'important');
-          app.style.setProperty('background', currentTheme.bg, 'important');
+      useEffect(function isolateReaderTheme() {
+        // Reader theme palette is scoped strictly to .sr-reader.
+        // Clean up any background properties on outer containers so the host and shelf never inherit reader background.
+        function sanitizeHostTheme() {
+          try {
+            const app = readerRef.current ? readerRef.current.closest('.sr-app') : document.querySelector('.sr-app');
+            if (app) {
+              app.style.removeProperty('background');
+              app.style.removeProperty('--sr-bg');
+            }
+            const centerCol = readerRef.current ? readerRef.current.closest('[class*="_centerCol"]') : document.querySelector('[class*="_centerCol"]');
+            if (centerCol) {
+              centerCol.style.removeProperty('background');
+            }
+          } catch (e) { /* ignore */ }
         }
-        const centerCol = readerRef.current.closest('[class*="_centerCol"]');
-        if (centerCol) {
-          centerCol.style.setProperty('background', currentTheme.bg, 'important');
-        }
-      }, [activeThemeId, currentTheme.bg]);
+        sanitizeHostTheme();
+        return sanitizeHostTheme;
+      }, [activeThemeId]);
 
       useEffect(function focusSearch() {
         if (drawer !== 'search') return undefined;
@@ -965,7 +988,76 @@
           setPeek({ id: id, x: position.x, y: position.y, below: position.below });
           return;
         }
-        if (target && typeof target.closest === 'function' && target.closest('a,button')) return;
+        const anchor = target && typeof target.closest === 'function' ? target.closest('a') : null;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const epubType = anchor.getAttribute('epub:type') || '';
+          const role = anchor.getAttribute('role') || '';
+          const className = anchor.className || '';
+          const isNoteRef = href.indexOf('#') >= 0 ||
+            /noteref|footnote|comment/i.test(epubType) ||
+            /noteref|doc-noteref/i.test(role) ||
+            /noteref|footnote/i.test(className);
+
+          if (isNoteRef && href) {
+            event.preventDefault();
+            event.stopPropagation();
+            const targetId = href.indexOf('#') >= 0 ? href.split('#')[1] : '';
+            let noteHtml = '';
+            let noteText = '';
+            if (targetId) {
+              let el = null;
+              try {
+                el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
+                     document.getElementById(targetId);
+              } catch (e) { /* ignore */ }
+              if (el) {
+                const container = el.closest('p, div, aside, li') || el.parentElement || el;
+                noteHtml = container.innerHTML;
+                noteText = container.innerText || container.textContent || '';
+              } else {
+                const pattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+                const para = chapter.paragraphs.find(function findP(p) { return pattern.test(p); });
+                if (para) {
+                  noteHtml = para;
+                  noteText = stripHtmlTags(para);
+                } else {
+                  for (let i = 0; i < (book.chapters || []).length; i += 1) {
+                    const c = book.chapters[i];
+                    const foundP = (c.paragraphs || []).find(function findInC(p) { return pattern.test(p); });
+                    if (foundP) {
+                      noteHtml = foundP;
+                      noteText = stripHtmlTags(foundP);
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (noteHtml || noteText) {
+              const rect = anchor.getBoundingClientRect();
+              const position = popoverPosition(rect, 170);
+              dismissPopovers();
+              setFootnote({
+                id: targetId,
+                title: anchor.textContent.trim() || t('footnote'),
+                html: noteHtml,
+                text: noteText,
+                x: position.x,
+                y: position.y,
+                below: position.below,
+              });
+              return;
+            }
+          }
+          if (/^https?:\/\//i.test(href)) {
+            event.preventDefault();
+            try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (e) { /* ignore */ }
+            return;
+          }
+          return;
+        }
+        if (target && typeof target.closest === 'function' && target.closest('button')) return;
         const selection = window.getSelection();
         if (selection && !selection.isCollapsed) return;
         dismissPopovers();
@@ -1321,6 +1413,7 @@
         if (drawer) { setDrawer(null); return; }
         setToolbar(null);
         setPeek(null);
+        setFootnote(null);
       }
 
       function segmentParagraph(text, base, highlights) {
@@ -1330,14 +1423,16 @@
           const end = clamp(item.end - base, 0, text.length);
           if (end > start) ranges.push({ item: item, start: start, end: end });
         });
-        if (!ranges.length) return [text];
+        if (!ranges.length) return renderInline(text, 'p-' + base);
         ranges.sort(function order(a, b) { return a.start - b.start; });
         const nodes = [];
         let cursor = 0;
         ranges.forEach(function range(item) {
           const start = Math.max(cursor, item.start);
           const end = Math.max(start, item.end);
-          if (start > cursor) nodes.push(text.slice(cursor, start));
+          if (start > cursor) {
+            nodes.push.apply(nodes, renderInline(text.slice(cursor, start), 'r-' + base + '-' + cursor));
+          }
           if (end > start) {
             const color = HIGHLIGHT_COLORS.find(function find(entry) { return entry.id === item.item.color; }) || HIGHLIGHT_COLORS[0];
             nodes.push(h('mark', {
@@ -1347,11 +1442,13 @@
               'data-style': item.item.style || 'highlight',
               'data-note': item.item.note ? 'true' : 'false',
               style: { '--sr-hl': color.value },
-            }, text.slice(start, end)));
+            }, renderInline(text.slice(start, end), 'hl-' + base + '-' + start)));
           }
           cursor = Math.max(cursor, end);
         });
-        if (cursor < text.length) nodes.push(text.slice(cursor));
+        if (cursor < text.length) {
+          nodes.push.apply(nodes, renderInline(text.slice(cursor), 'r-' + base + '-' + cursor));
+        }
         return nodes;
       }
 
@@ -1392,11 +1489,255 @@
               t('imageMissing', { name: picture.name }));
           }
           const trimmed = text.trim();
-          const isDivider = trimmed === '***' || trimmed === '---' || trimmed === '———' || trimmed === '···' || trimmed === '❦' || trimmed === '~~~';
-          const isHeading = /^#{2,4}\s+/.test(trimmed);
+
+          // 1. EPUB Rich HTML block (ruby, strong, em, table, blockquote, footnotes, headings)
+          if (/<[a-z0-9]+\b[^>]*>/i.test(text)) {
+            const base = offsets.offsets[index];
+            const cleanLen = stripHtmlTags(text).length;
+            const relevantHls = chapterHighlights.filter(function(h) {
+              return h.end > base && h.start < base + cleanLen;
+            });
+            const renderedHtml = applyHtmlHighlights(text, base, relevantHls);
+
+            if (trimmed.startsWith('<table') && trimmed.endsWith('</table>')) {
+              return h('div', {
+                key: index,
+                'data-p': index,
+                className: 'sr-table-wrap',
+                role: 'region',
+                'aria-label': t('table'),
+                tabIndex: 0,
+                dangerouslySetInnerHTML: { __html: renderedHtml }
+              });
+            }
+            if (trimmed.startsWith('<blockquote') && trimmed.endsWith('</blockquote>')) {
+              return h('blockquote', {
+                key: index,
+                'data-p': index,
+                className: 'sr-quote',
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<blockquote\b[^>]*>/i, '').replace(/<\/blockquote>$/i, '') }
+              });
+            }
+            if (/^<h[1-6]\b/i.test(trimmed) && /<\/h[1-6]>$/i.test(trimmed)) {
+              const Tag = trimmed.slice(1, 3).toLowerCase();
+              return h(Tag, {
+                key: index,
+                'data-p': index,
+                className: 'sr-subheading',
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<h[1-6]\b[^>]*>/i, '').replace(/<\/h[1-6]>$/i, '') }
+              });
+            }
+            if (/^<aside\b/i.test(trimmed) && /<\/aside>$/i.test(trimmed)) {
+              const idMatch = trimmed.match(/\bid=["']([^"']+)["']/i);
+              return h('aside', {
+                key: index,
+                'data-p': index,
+                id: idMatch ? idMatch[1] : undefined,
+                className: 'sr-aside-note',
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<aside\b[^>]*>/i, '').replace(/<\/aside>$/i, '') }
+              });
+            }
+            if (trimmed.startsWith('<hr')) {
+              return h('div', { key: index, 'data-p': index, className: 'sr-divider-wrap' }, h('hr', { className: 'sr-divider' }));
+            }
+            return h('p', {
+              key: index,
+              'data-p': index,
+              dangerouslySetInnerHTML: { __html: renderedHtml }
+            });
+          }
+
+          // 2. Divider line (***, ---, ___, ❦, etc.)
+          const isDivider = trimmed === '***' || trimmed === '---' || trimmed === '___' || trimmed === '———' || trimmed === '···' || trimmed === '❦' || trimmed === '~~~';
+          if (isDivider) {
+            return h('div', {
+              key: index,
+              'data-p': index,
+              className: 'sr-divider-wrap',
+            }, h('hr', { className: 'sr-divider' }));
+          }
+
+          // 2. Fenced code block (```lang ... ``` or ~~~lang ... ~~~)
+          if ((trimmed.startsWith('```') || trimmed.startsWith('~~~')) && (text.includes('\n') || trimmed.length > 3)) {
+            const lines = text.split('\n');
+            const firstLine = lines[0].trim();
+            const fence = firstLine.startsWith('```') ? '```' : '~~~';
+            const lang = firstLine.slice(fence.length).trim();
+            const lastLine = lines[lines.length - 1].trim();
+            const codeLines = lines.slice(1, (lines.length > 1 && lastLine.startsWith(fence)) ? lines.length - 1 : lines.length);
+            const codeContent = codeLines.join('\n');
+
+            return h('div', {
+              key: index,
+              'data-p': index,
+              className: 'sr-code-container',
+              role: 'region',
+              'aria-label': (lang ? lang + ' ' : '') + t('codeBlock'),
+            },
+              h('div', { className: 'sr-code-header' },
+                h('span', { className: 'sr-code-lang' }, lang || 'CODE'),
+                h('button', {
+                  type: 'button',
+                  className: 'sr-code-copy-btn',
+                  'aria-label': t('copyShort'),
+                  onClick: function onCopy(e) {
+                    e.stopPropagation();
+                    copyTextToClipboard(codeContent).then(function() {
+                      props.showToast(t('copied'));
+                    });
+                  },
+                }, t('copyShort')),
+              ),
+              h('pre', { className: 'sr-code-pre', tabIndex: 0 },
+                h('code', { className: lang ? 'language-' + lang : undefined }, codeContent)
+              )
+            );
+          }
+
+          // 3. Math block ($$ ... $$)
+          if (trimmed.startsWith('$$') && (trimmed.endsWith('$$') || text.includes('\n'))) {
+            const mathContent = trimmed.replace(/^\$\$\s*/, '').replace(/\s*\$\$$/, '');
+            return h('div', {
+              key: index,
+              'data-p': index,
+              className: 'sr-math-block',
+              role: 'math',
+              'aria-label': t('mathFormula'),
+              tabIndex: 0,
+            },
+              h('code', { className: 'sr-math-tex' }, mathContent)
+            );
+          }
+
+          // 4. Markdown table (| col1 | col2 |\n| --- | --- |\n...)
+          if (text.includes('|') && text.includes('\n')) {
+            const tableData = parseMarkdownTable(text);
+            if (tableData) {
+              return h('div', {
+                key: index,
+                'data-p': index,
+                className: 'sr-table-wrap',
+                role: 'region',
+                'aria-label': t('table'),
+                tabIndex: 0,
+              },
+                h('table', { className: 'sr-table' },
+                  h('thead', null,
+                    h('tr', null,
+                      tableData.headers.map(function(cell, cIdx) {
+                        return h('th', { key: cIdx, style: { textAlign: cell.align } }, renderInline(cell.text, 'th-' + index + '-' + cIdx));
+                      })
+                    )
+                  ),
+                  h('tbody', null,
+                    tableData.rows.map(function(row, rIdx) {
+                      return h('tr', { key: rIdx },
+                        row.map(function(cell, cIdx) {
+                          return h('td', { key: cIdx, style: { textAlign: cell.align } }, renderInline(cell.text, 'td-' + index + '-' + rIdx + '-' + cIdx));
+                        })
+                      );
+                    })
+                  )
+                )
+              );
+            }
+          }
+
+          // 5. Callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING], > [!CAUTION])
+          if (/^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(trimmed)) {
+            const calloutData = parseMarkdownCallout(text);
+            if (calloutData) {
+              const CALLOUT_ICONS = {
+                note: 'ℹ️',
+                tip: '💡',
+                important: '❗',
+                warning: '⚠️',
+                caution: '🛑',
+              };
+              return h('div', {
+                key: index,
+                'data-p': index,
+                className: 'sr-callout',
+                'data-type': calloutData.type,
+                role: 'note',
+              },
+                h('div', { className: 'sr-callout-title', style: { fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' } },
+                  CALLOUT_ICONS[calloutData.type] || '💡',
+                  ' ' + calloutData.type.toUpperCase()
+                ),
+                h('div', { className: 'sr-callout-body' },
+                  calloutData.lines.map(function(line, lIdx) {
+                    return h('p', { key: lIdx, style: { margin: '4px 0', textIndent: 0 } }, renderInline(line, 'callout-' + index + '-' + lIdx));
+                  })
+                )
+              );
+            }
+          }
+
+          // 6. Blockquote (> quote)
+          if (trimmed.startsWith('>') && trimmed.split('\n').every(function(l) { return !l.trim() || l.trim().startsWith('>'); })) {
+            const quoteText = text.split('\n').map(function(l) { return l.replace(/^\s*>\s?/, ''); }).join('\n');
+            return h('blockquote', {
+              key: index,
+              'data-p': index,
+              className: 'sr-quote',
+            }, renderInline(quoteText, 'q-' + index));
+          }
+
+          // 7. Markdown list / task list
+          if (text.includes('\n') || /^([-*+]|\d+\.)\s+/.test(trimmed)) {
+            const listData = parseMarkdownList(text);
+            if (listData) {
+              const ListTag = listData.isOrdered ? 'ol' : 'ul';
+              return h(ListTag, {
+                key: index,
+                'data-p': index,
+                className: listData.hasTask ? 'sr-task-list' : undefined,
+                style: { margin: 'calc(var(--sr-para-gap,.9em) * .8) 0', paddingLeft: '1.8em', textIndent: 0 },
+              },
+                listData.items.map(function(item, iIdx) {
+                  if (item.isTask) {
+                    return h('li', {
+                      key: iIdx,
+                      className: 'sr-task-item' + (item.checked ? ' sr-task-done' : ''),
+                      style: { listStyleType: 'none', marginLeft: '-1.2em', display: 'flex', alignItems: 'baseline', gap: '8px' },
+                    },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: item.checked,
+                        disabled: true,
+                        className: 'sr-task-checkbox',
+                        'aria-label': item.text,
+                      }),
+                      h('span', null, renderInline(item.text, 'task-' + index + '-' + iIdx))
+                    );
+                  }
+                  return h('li', { key: iIdx }, renderInline(item.text, 'li-' + index + '-' + iIdx));
+                })
+              );
+            }
+          }
+
+          // 8. Subheadings (##, ###, etc.)
+          const headingMatch = trimmed.match(/^(#{2,6})\s+(.+)$/);
+          if (headingMatch) {
+            const level = headingMatch[1].length;
+            const headingClean = headingMatch[2].trim();
+            const Tag = 'h' + Math.min(6, level + 1);
+            return h(Tag, {
+              key: index,
+              'data-p': index,
+              className: 'sr-subheading',
+              id: 'h-' + index,
+            }, segmentParagraph(headingClean, offsets.offsets[index], chapterHighlights));
+          }
+
+          // 9. Traditional verse & quotes
           const verse = text.indexOf('\n') >= 0 && (trimmed.charAt(0) === '《' || trimmed.startsWith('诗') || trimmed.startsWith('——'));
-          const quote = (trimmed.length > 20 && ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('「') && trimmed.endsWith('」')) || (trimmed.startsWith('『') && trimmed.endsWith('』')))) || trimmed.startsWith('> ') || trimmed.startsWith('》');
-          const pClass = isDivider ? 'sr-divider' : (isHeading ? 'sr-subheading' : (verse ? 'sr-verse' : (quote ? 'sr-quote' : undefined)));
+          const quote = (trimmed.length > 20 && ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('「') && trimmed.endsWith('」')) || (trimmed.startsWith('『') && trimmed.endsWith('』')))) || trimmed.startsWith('》');
+          const pClass = verse ? 'sr-verse' : (quote ? 'sr-quote' : undefined);
+
+          // 10. Normal paragraph
           return h('p', {
             key: index,
             'data-p': index,
@@ -2055,6 +2396,27 @@
               ),
             ),
             h('div', { className: 'sr-setting-group' },
+              h('div', { className: 'sr-setting-toggle-row' },
+                h('div', null,
+                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('readingRuler')),
+                  h('p', { className: 'sr-setting-hint' }, t('readingRulerHint')),
+                ),
+                h('button', {
+                  type: 'button',
+                  role: 'switch',
+                  className: 'sr-switch',
+                  'aria-checked': Boolean(settings.readingRuler || rulerOpen),
+                  'aria-label': t('readingRuler'),
+                  onClick: function toggleRuler() {
+                    const next = !(settings.readingRuler || rulerOpen);
+                    setRulerOpen(next);
+                    applySettings({ readingRuler: next });
+                    props.showToast(next ? t('rulerOn') : t('rulerOff'));
+                  },
+                }, h('span', { className: 'sr-switch-thumb' })),
+              ),
+            ),
+            h('div', { className: 'sr-setting-group' },
               h('div', { className: 'sr-setting-label' }, t('speechVoice')),
               voices.length
                 ? h('select', {
@@ -2088,6 +2450,7 @@
                     textAlign: 'justify',
                     autoHideChrome: false,
                     paperSound: false,
+                    readingRuler: false,
                   });
                   props.showToast(t('settingsReset'));
                 },
@@ -2496,7 +2859,7 @@
             onPointerDown: handlePointerDown,
             onPointerUp: handlePointerUp,
             onMouseMove: function handleMouseMove(e) {
-              if (rulerOpen && stageRef.current) {
+              if ((rulerOpen || settings.readingRuler) && stageRef.current) {
                 const rect = stageRef.current.getBoundingClientRect();
                 setRulerY(clamp(e.clientY - rect.top, 24, Math.max(24, rect.height - 24)));
               }
@@ -2504,7 +2867,7 @@
             onClick: handleStageClick,
             onDoubleClick: handleStageDoubleClick,
           },
-            rulerOpen ? h('div', {
+            (rulerOpen || settings.readingRuler) ? h('div', {
               className: 'sr-reading-ruler',
               style: { top: rulerY + 'px' },
               'aria-hidden': 'true',
@@ -2889,6 +3252,35 @@
               h('button', { type: 'button', className: 'sr-hl-peek-btn', onClick: function close() { setPeek(null); } }, t('close')),
             ),
           ),
+        ) : null,
+        footnote ? h('div', {
+          role: 'dialog',
+          'aria-label': t('footnote'),
+          className: 'sr-footnote-popover',
+          style: {
+            left: footnote.x + 'px',
+            top: footnote.y + 'px',
+            transform: footnote.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
+          },
+          onClick: function stop(e) { e.stopPropagation(); },
+        },
+          h('div', { className: 'sr-footnote-head' },
+            h('span', { className: 'sr-footnote-title' },
+              h(Icon, { name: 'bookmark', size: 14 }),
+              h('span', null, footnote.title ? (t('footnote') + ' ' + footnote.title) : t('footnote')),
+            ),
+            h('button', {
+              type: 'button',
+              className: 'sr-footnote-close',
+              title: t('close'),
+              'aria-label': t('close'),
+              onClick: function close() { setFootnote(null); },
+            }, h(Icon, { name: 'close', size: 14 })),
+          ),
+          h('div', {
+            className: 'sr-footnote-body',
+            dangerouslySetInnerHTML: footnote.html ? { __html: footnote.html } : undefined,
+          }, !footnote.html ? footnote.text : null),
         ) : null,
         thoughtComposer(),
         cardHighlight ? h(QuoteCardDialog, {

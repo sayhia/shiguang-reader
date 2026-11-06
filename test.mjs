@@ -31,7 +31,7 @@ assert.match(read('icon.svg'), /<svg[\s>]/);
 let clientSource = read('client.js');
 const marker = '    return {\n      inject:';
 assert.ok(clientSource.includes(marker), 'plugin export marker is present');
-const exposed = '    globalThis.__test = { bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, saveState, unwrittenBookIds, parseEpubBook, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
+const exposed = '    globalThis.__test = { bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, parseMarkdownTable, parseMarkdownList, parseMarkdownCallout, renderInline, stripHtmlTags, injectHighlightIntoHtml, applyHtmlHighlights, saveState, unwrittenBookIds, parseEpubBook, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
 const instrumented = clientSource.replace(marker, exposed + marker);
 
 const registrations = [];
@@ -116,6 +116,121 @@ const longText = Array.from({ length: 20 }, (_, index) => '第' + (index + 1) + 
 const longBook = T.parseImportedBook('长文.md', longText);
 assert.ok(longBook.chapters.length > 1, 'long headingless text should be chapterized');
 
+// Markdown import parsing: front matter, headings, code blocks, tables, callouts, lists
+const mdSample = `---
+title: "Markdown 深度解析"
+author: "技术专家"
+---
+
+# 第一章 Markdown 进阶
+
+这是包含 **加粗文本** 与 *斜体文本* 以及 \`console.log("hello")\` 的段落。
+
+## 代码与公式
+
+下面是一段带有注释的代码块：
+
+\`\`\`javascript
+// # 这不是章节标题，是代码注释
+function calculateSum(a, b) {
+  return a + b;
+}
+\`\`\`
+
+$$
+E = mc^2
+$$
+
+> [!NOTE]
+> 这是一个测试提示框！
+
+| 语法 | 说明 | 兼容性 |
+| :--- | :---: | ---: |
+| 表格 | 响应式表格 | 完整 |
+| 代码 | 语法代码块 | 完整 |
+
+- [ ] 待办事项
+- [x] 已完成事项
+- 普通列表项
+
+---
+
+尾部段落。
+`;
+
+const mdBook = T.parseImportedBook('guide.md', mdSample);
+assert.equal(mdBook.title, 'Markdown 深度解析');
+assert.equal(mdBook.author, '技术专家');
+assert.equal(mdBook.format, 'markdown');
+assert.equal(mdBook.chapters.length, 1);
+assert.equal(mdBook.chapters[0].title, '第一章 Markdown 进阶');
+
+// Verify that the code block was kept intact and did not split on comments
+const codePara = mdBook.chapters[0].paragraphs.find(p => p.startsWith('```javascript'));
+assert.ok(codePara, 'code block preserved as single paragraph');
+assert.ok(codePara.includes('// # 这不是章节标题'), 'code comments preserved without false chapter split');
+
+// Verify table parser helper
+const parsedTable = T.parseMarkdownTable('| 标头A | 标头B |\n|:---|---:|\n| 内容1 | 内容2 |');
+assert.ok(parsedTable);
+assert.equal(parsedTable.headers.length, 2);
+assert.equal(parsedTable.headers[0].text, '标头A');
+assert.equal(parsedTable.headers[0].align, 'left');
+assert.equal(parsedTable.headers[1].align, 'right');
+assert.equal(parsedTable.rows.length, 1);
+assert.equal(parsedTable.rows[0][0].text, '内容1');
+
+// Verify list parser helper
+const parsedList = T.parseMarkdownList('- [ ] 任务一\n- [x] 任务二\n- 普通三');
+assert.ok(parsedList);
+assert.equal(parsedList.isOrdered, false);
+assert.equal(parsedList.hasTask, true);
+assert.equal(parsedList.items.length, 3);
+assert.equal(parsedList.items[0].isTask, true);
+assert.equal(parsedList.items[0].checked, false);
+assert.equal(parsedList.items[1].checked, true);
+assert.equal(parsedList.items[2].isTask, false);
+
+// Verify callout parser helper
+const parsedCallout = T.parseMarkdownCallout('> [!WARNING]\n> 请注意危险操作\n> 请备份数据');
+assert.ok(parsedCallout);
+assert.equal(parsedCallout.type, 'warning');
+assert.equal(parsedCallout.lines.length, 2);
+assert.equal(parsedCallout.lines[0], '请注意危险操作');
+
+// Verify inline markdown renderer
+const inlineNodes = T.renderInline('前缀 **加粗** 中间 `代码` 后缀 [链接](https://example.com)');
+assert.ok(Array.isArray(inlineNodes));
+assert.ok(inlineNodes.some(n => n && n.type === 'strong' && n.props && n.props.children === '加粗'));
+assert.ok(inlineNodes.some(n => n && n.type === 'code' && n.props && n.props.children === '代码'));
+assert.ok(inlineNodes.some(n => n && n.type === 'a' && n.props && n.props.children === '链接'));
+
+// Verify HTML stripping & ruby text handling
+const sampleRichHtml = '<p>有<strong>造境</strong>，有<em>写境</em>，此<ruby>理<rt>lǐ</rt>想<rt>xiǎng</rt></ruby>之别。&amp;&nbsp;&lt;&gt;</p>';
+const cleanPlain = T.stripHtmlTags(sampleRichHtml);
+assert.equal(cleanPlain, '有造境，有写境，此理想之别。& <>');
+assert.ok(!cleanPlain.includes('lǐ'), 'ruby annotations stripped from search text');
+
+// Verify tag-safe highlight injection into rich HTML
+const htmlHlResult = T.injectHighlightIntoHtml('<p>词以<strong>境界</strong>为最上。</p>', 2, 4, { id: 'hl-test', colorVal: '#ffd54f' });
+assert.ok(htmlHlResult.includes('<strong><mark class="sr-hl" data-hl="hl-test"'), 'highlight correctly nested inside strong tag');
+assert.ok(htmlHlResult.includes('境界</mark></strong>'), 'closing mark nested before closing strong tag');
+
+// Verify multiple highlights application descending
+const multiHl = T.applyHtmlHighlights('<p>词以<strong>境界</strong>为最上。有境界则自成高格。</p>', 0, [
+  { id: 'h1', start: 2, end: 4, color: 'amber' },
+  { id: 'h2', start: 14, end: 16, color: 'mint' },
+]);
+assert.ok(multiHl.includes('data-hl="h1"') && multiHl.includes('data-hl="h2"'));
+
+// Verify footnote and aside HTML stripping
+const footnoteText = T.stripHtmlTags('<aside id="fn1" epub:type="footnote"><p><a href="#ref1">1</a> 注释内容。</p></aside>');
+assert.equal(footnoteText, '1 注释内容。');
+
+// Verify format preservation in fsBodyFileName
+assert.equal(T.fsBodyFileName({ id: 'md1', title: '文档', format: 'markdown' }), '文档--md1.md');
+assert.equal(T.fsBodyFileName({ id: 'txt1', title: '小说', format: 'txt' }), '小说--txt1.txt');
+
 // Text decoding handles BOM-marked UTF-16 and UTF-8.
 const utf8Bytes = new TextEncoder().encode('第一章 海风');
 assert.equal(T.decodeTextBytes(utf8Bytes), '第一章 海风');
@@ -169,11 +284,12 @@ const normalized = T.normalizeState({
 assert.deepEqual(plain(normalized.settings), {
   theme: 'paper', fontSize: 28, lineHeight: 1.5, fontFamily: 'serif',
   letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false, paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
-  textAlign: 'justify',
+  textAlign: 'justify', readingRuler: false,
 });
-const customTypography = T.normalizeState({ settings: { letterSpacing: 1, paragraphSpacing: 0, pageWidth: 'massive', textAlign: 'left', paperSound: true } });
+const customTypography = T.normalizeState({ settings: { letterSpacing: 1, paragraphSpacing: 0, pageWidth: 'massive', textAlign: 'left', paperSound: true, readingRuler: true } });
 assert.equal(customTypography.settings.letterSpacing, 0.12);
 assert.equal(customTypography.settings.paragraphSpacing, 0.5);
+assert.equal(customTypography.settings.readingRuler, true);
 assert.equal(customTypography.settings.pageWidth, 'comfortable');
 assert.equal(customTypography.settings.autoHideChrome, false);
 assert.equal(customTypography.settings.paperSound, true);
@@ -1824,6 +1940,16 @@ const zoomFigure = figureNodes.find((node) => node.props.className.indexOf('sr-f
 assert.equal(typeof zoomFigure.props.onClick, 'function', 'the picture is clickable');
 assert.equal(zoomFigure.props.role, 'button');
 assert.equal(typeof zoomFigure.props.onKeyDown, 'function', 'keyboard users can open it too');
+
+// Reader renders Markdown books with code containers, tables, callouts, subheadings, task lists
+const mdReader = T.Reader(Object.assign({}, smokeReaderProps, { book: mdBook, initialChapterIndex: 0 }));
+const allMdNodes = collectNodes(mdReader, []);
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-code-container')), 'code block container rendered');
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-table-wrap')), 'table wrap rendered');
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-callout')), 'callout rendered');
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-task-list')), 'task list rendered');
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-subheading')), 'subheading rendered');
+assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-divider-wrap')), 'divider rendered');
 assert.equal(T.imageParagraph('![潮水](img-1-1.png)').name, 'img-1-1.png');
 assert.equal(T.imageParagraph('潮水'), null);
 assert.equal(T.imageParagraph(''), null);
@@ -2214,10 +2340,17 @@ for (const char of css) {
   assert.ok(depth >= 0, 'CSS braces do not underflow');
 }
 assert.equal(depth, 0, 'CSS braces are balanced');
-for (const selector of ['.sr-reader', '.sr-columns', '.sr-search-field', '.sr-note-editor', '.sr-drop-overlay', '.sr-page-jump-popover', '.sr-page-jump-input', '.sr-review-card-action', '.sr-color-filter-pill', '.sr-shelf-select', '.sr-bulk-action', '.sr-bulk-done', '.sr-shelf-delete-bar', '.sr-bulk-menu', '.sr-shelf-bulk-tag', '.sr-select-check', '.sr-sheet']) {
+for (const selector of ['.sr-reader', '.sr-columns', '.sr-search-field', '.sr-note-editor', '.sr-drop-overlay', '.sr-page-jump-popover', '.sr-page-jump-input', '.sr-review-card-action', '.sr-color-filter-pill', '.sr-shelf-select', '.sr-bulk-action', '.sr-bulk-done', '.sr-shelf-delete-bar', '.sr-bulk-menu', '.sr-shelf-bulk-tag', '.sr-select-check', '.sr-sheet', '.sr-footnote-popover', '.sr-reading-ruler', '.sr-aside-note']) {
   assert.ok(css.includes(selector), 'CSS has ' + selector);
 }
 assert.ok(css.includes('.sr-sheet{') && css.includes('transform:translateX(-50%)'), 'settings sheet must stay centered horizontally');
+
+// Host and shelf theme isolation: reader themes must never override host frame, centerCol or shelf backgrounds
+assert.ok(!css.includes('_centerCol"]:has(.sr-reader[data-theme='), 'host centerCol must not be overridden by reader theme background');
+assert.ok(!css.includes('.sr-app:has(.sr-reader[data-theme='), 'sr-app root must not have background forced by reader theme');
+assert.ok(!css.includes('_frame"]:has(.sr-reader){\n  background:'), 'host frame must not have background overridden by reader');
+assert.ok(!clientSource.includes('centerCol.style.setProperty(\'background\''), 'reader must not set inline background on host centerCol');
+assert.ok(!clientSource.includes('app.style.setProperty(\'background\''), 'reader must not set inline background on sr-app');
 
 console.log('PASS  manifest + icon + locale metadata');
 console.log('PASS  client module, slot registration, dictionary registration');

@@ -9,14 +9,14 @@
     ];
 
     const READER_THEMES = [
-      { id: 'paper', bg: '#f3ede2', panel: '#faf5eb', ink: '#322920', muted: '#867763', line: 'rgba(94,73,48,0.14)', accent: '#9c6a36', wash: 'rgba(156,106,54,0.12)' },
-      { id: 'candle', bg: '#f4e6ce', panel: '#faeedc', ink: '#3e2918', muted: '#8f7051', line: 'rgba(90,56,22,0.14)', accent: '#ad6b2a', wash: 'rgba(173,107,42,0.14)' },
-      { id: 'snow', bg: '#f8f7f4', panel: '#ffffff', ink: '#292825', muted: '#848077', line: 'rgba(62,60,54,0.11)', accent: '#467268', wash: 'rgba(70,114,104,0.1)' },
-      { id: 'mint', bg: '#e6eee4', panel: '#f1f6ef', ink: '#273428', muted: '#6b7c69', line: 'rgba(50,72,52,0.13)', accent: '#4a744b', wash: 'rgba(74,116,75,0.12)' },
-      { id: 'forest', bg: '#121c18', panel: '#1a2721', ink: '#c3d6cc', muted: '#769183', line: 'rgba(180,210,195,0.12)', accent: '#65a982', wash: 'rgba(101,169,130,0.14)' },
-      { id: 'night', bg: '#151a1d', panel: '#1d2529', ink: '#c9c3b7', muted: '#7e8784', line: 'rgba(206,198,181,0.12)', accent: '#cbb07a', wash: 'rgba(203,176,122,0.12)' },
-      { id: 'oled', bg: '#000000', panel: '#0d0d0e', ink: '#b8b5ab', muted: '#73736c', line: 'rgba(255,255,255,0.1)', accent: '#c49d64', wash: 'rgba(196,157,100,0.14)' },
-      { id: 'eink', bg: '#ffffff', panel: '#ffffff', ink: '#000000', muted: '#444444', line: 'rgba(0,0,0,0.22)', accent: '#000000', wash: 'rgba(0,0,0,0.08)' },
+      { id: 'paper', bg: '#f3ede2', panel: '#faf5eb', ink: '#322920', muted: '#6e5f4d', line: 'rgba(94,73,48,0.16)', accent: '#9c6a36', wash: 'rgba(156,106,54,0.14)' },
+      { id: 'candle', bg: '#f4e6ce', panel: '#faeedc', ink: '#2e1d0f', muted: '#725439', line: 'rgba(90,56,22,0.14)', accent: '#ad6b2a', wash: 'rgba(173,107,42,0.14)' },
+      { id: 'snow', bg: '#f8f7f4', panel: '#ffffff', ink: '#292825', muted: '#6c6860', line: 'rgba(62,60,54,0.11)', accent: '#467268', wash: 'rgba(70,114,104,0.1)' },
+      { id: 'mint', bg: '#e6eee4', panel: '#f1f6ef', ink: '#273428', muted: '#586856', line: 'rgba(50,72,52,0.13)', accent: '#4a744b', wash: 'rgba(74,116,75,0.12)' },
+      { id: 'forest', bg: '#121c18', panel: '#1a2721', ink: '#c3d6cc', muted: '#92b2a1', line: 'rgba(180,210,195,0.12)', accent: '#65a982', wash: 'rgba(101,169,130,0.14)' },
+      { id: 'night', bg: '#151a1d', panel: '#1d2529', ink: '#e2ded5', muted: '#9ea7a4', line: 'rgba(206,198,181,0.14)', accent: '#cbb07a', wash: 'rgba(203,176,122,0.12)' },
+      { id: 'oled', bg: '#000000', panel: '#0d0d0e', ink: '#dcd8cd', muted: '#94948d', line: 'rgba(255,255,255,0.12)', accent: '#c49d64', wash: 'rgba(196,157,100,0.14)' },
+      { id: 'eink', bg: '#ffffff', panel: '#ffffff', ink: '#000000', muted: '#333333', line: 'rgba(0,0,0,0.22)', accent: '#000000', wash: 'rgba(0,0,0,0.08)' },
     ];
 
     const HIGHLIGHT_COLORS = [

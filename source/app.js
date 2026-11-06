@@ -1119,7 +1119,34 @@
       const exitReader = useCallback(function exit() {
         setReader(null);
         setTab('shelf');
+        try {
+          const app = document.querySelector('.sr-app');
+          if (app) {
+            app.style.removeProperty('background');
+            app.style.removeProperty('--sr-bg');
+          }
+          const centerCol = document.querySelector('[class*="_centerCol"]');
+          if (centerCol) {
+            centerCol.style.removeProperty('background');
+          }
+        } catch (e) { /* ignore */ }
       }, []);
+
+      useEffect(function sanitizeShelfTheme() {
+        if (!reader) {
+          try {
+            const app = document.querySelector('.sr-app');
+            if (app) {
+              app.style.removeProperty('background');
+              app.style.removeProperty('--sr-bg');
+            }
+            const centerCol = document.querySelector('[class*="_centerCol"]');
+            if (centerCol) {
+              centerCol.style.removeProperty('background');
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }, [reader]);
       const openBook = useCallback(function open(book) {
         if (book) setDetailId(book.id);
       }, []);

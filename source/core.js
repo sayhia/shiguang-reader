@@ -140,11 +140,29 @@
       return { alt: match[1], name: match[2] };
     }
 
+    function stripHtmlTags(str) {
+      return String(str || '')
+        .replace(/<rt\b[^>]*>[\s\S]*?<\/rt>/gi, '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"');
+    }
+
     function chapterText(chapter) {
       // Picture lines are not prose: keeping them out of this join keeps them out of
       // search snippets, read-aloud chunks, word counts and excerpts.
-      return chapter.paragraphs
+      const paragraphs = chapter && Array.isArray(chapter.paragraphs) ? chapter.paragraphs : [];
+      return paragraphs
         .filter(function keep(text) { return !imageParagraph(text); })
+        .map(function toText(text) {
+          if (/<[a-z][\s\S]*>/i.test(text)) {
+            return stripHtmlTags(text);
+          }
+          return text;
+        })
         .join('\n');
     }
 
@@ -159,7 +177,10 @@
         const paragraphs = Array.isArray(chapter && chapter.paragraphs) ? chapter.paragraphs : [];
         paragraphs.forEach(function add(text) {
           // `![图注](文件名.png)` is a place for a picture, not words to read.
-          if (!imageParagraph(text)) total += String(text || '').length;
+          if (!imageParagraph(text)) {
+            const clean = /<[a-z][\s\S]*>/i.test(text) ? stripHtmlTags(text) : text;
+            total += String(clean || '').length;
+          }
         });
       });
       return total;
@@ -196,13 +217,15 @@
     function chapterBaseOffsets(chapter) {
       const offsets = [];
       let cursor = 0;
-      chapter.paragraphs.forEach(function base(text, index) {
+      const paragraphs = chapter && Array.isArray(chapter.paragraphs) ? chapter.paragraphs : [];
+      paragraphs.forEach(function base(text, index) {
         // Picture lines are absent from chapterText, so they must not advance the
         // cursor either — otherwise every highlight after a picture quotes the
         // wrong run of characters.
         offsets[index] = cursor;
         if (imageParagraph(text)) return;
-        cursor += text.length + 1;
+        const cleanLen = (/<[a-z][\s\S]*>/i.test(text) ? stripHtmlTags(text) : text).length;
+        cursor += cleanLen + 1;
       });
       return { offsets: offsets, total: Math.max(0, cursor - 1) };
     }
@@ -604,15 +627,47 @@
         const error = new Error('empty');
         throw error;
       }
-      const title = String(fileName || '').replace(/\.[^.]+$/, '').trim().slice(0, 80) || UNTITLED;
+      let title = String(fileName || '').replace(/\.[^.]+$/, '').trim().slice(0, 80) || UNTITLED;
+      let author = '本地导入';
+      let lines = normalized.split('\n');
+
+      // Frontmatter extraction (YAML --- at the start of Markdown files)
+      if (lines[0] && lines[0].trim() === '---') {
+        let closingIdx = -1;
+        for (let i = 1; i < Math.min(lines.length, 30); i++) {
+          if (lines[i].trim() === '---') {
+            closingIdx = i;
+            break;
+          }
+        }
+        if (closingIdx > 0) {
+          const fmLines = lines.slice(1, closingIdx);
+          fmLines.forEach(function parseFm(l) {
+            const m = l.match(/^(\w+):\s*(.*)$/);
+            if (m) {
+              const k = m[1].toLowerCase();
+              const val = m[2].replace(/^["'\x27]+|["'\x27]+$/g, '').trim();
+              if (k === 'title' && val) title = val.slice(0, 80);
+              if (k === 'author' && val) author = val.slice(0, 60);
+            }
+          });
+          lines = lines.slice(closingIdx + 1);
+        }
+      }
+
+      const isMdFile = /\.(md|markdown)$/i.test(fileName) || lines.some(function(l) { return /^#{1,3}\s+/.test(l.trim()); });
+      const hasH1 = isMdFile && lines.some(function(l) { return /^#\s+[^\n]+/.test(l.trim()); });
+      const hasH2 = isMdFile && lines.some(function(l) { return /^##\s+[^\n]+/.test(l.trim()); });
+
       const headingPattern = /^(?:第[0-9零〇一二两三四五六七八九十百千万]+[章节回卷篇部](?:[ 　:：·、.\-—].{0,44})?|卷[0-9零〇一二三四五六七八九十百]+(?:[ 　:：·、.\-—].{0,36})?|(?:序章|楔子|引子|尾声|后记|前言|序言|番外)(?:[ 　:：·、.\-—].{0,34})?|chapter\s+[0-9ivxlc]+(?:[ 　:：·、.\-—].{0,44})?|#{1,4}\s+.+)$/i;
       const chapterNamePattern = /^(?:第[0-9零〇一二两三四五六七八九十百千万]+[章节回卷篇部]|卷[0-9零〇一二三四五六七八九十百]+|(?:序章|楔子|引子|尾声|后记|前言|序言|番外)|chapter\s+[0-9ivxlc]+)/i;
       const blankSeparated = /\n[ \t]*\n/.test(normalized);
-      const lines = normalized.split('\n');
       const chapters = [];
       let chapterTitle = '';
       let blocks = [];
       let buffer = [];
+      let inCodeBlock = false;
+      let inMathBlock = false;
 
       function flushParagraph() {
         if (!buffer.length) return;
@@ -640,22 +695,83 @@
 
       lines.forEach(function each(line) {
         const trimmed = line.trim();
-        const isHeading = trimmed.length > 0 && trimmed.length <= 84 && headingPattern.test(trimmed);
-        if (isHeading) {
-          const clean = cleanHeading(trimmed);
-          const markdownTitle = /^#\s+/.test(trimmed) && !/^##/.test(trimmed);
+
+        // 1. Fenced code block: do not parse headings or split paragraphs inside
+        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+          inCodeBlock = !inCodeBlock;
+          buffer.push(line);
+          if (!inCodeBlock) flushParagraph();
+          return;
+        }
+        if (inCodeBlock) {
+          buffer.push(line);
+          return;
+        }
+
+        // 2. Math block ($$)
+        if (trimmed.startsWith('$$')) {
+          inMathBlock = !inMathBlock;
+          buffer.push(line);
+          if (!inMathBlock) flushParagraph();
+          return;
+        }
+        if (inMathBlock) {
+          buffer.push(line);
+          return;
+        }
+
+        // 3. Heading detection:
+        let isChapterHeading = false;
+        let headingText = '';
+        if (trimmed.length > 0 && trimmed.length <= 84) {
+          if (hasH1 && /^#\s+[^\n]+/.test(trimmed)) {
+            isChapterHeading = true;
+            headingText = cleanHeading(trimmed);
+          } else if (!hasH1 && hasH2 && /^##\s+[^\n]+/.test(trimmed)) {
+            isChapterHeading = true;
+            headingText = cleanHeading(trimmed);
+          } else if (!hasH1 && !hasH2 && headingPattern.test(trimmed)) {
+            isChapterHeading = true;
+            headingText = cleanHeading(trimmed);
+          }
+        }
+
+        if (isChapterHeading) {
           const atStart = chapters.length === 0 && blocks.length === 0 && !chapterTitle;
-          if (markdownTitle && atStart && !chapterNamePattern.test(clean)) {
+          if (/^#\s+/.test(trimmed) && atStart && !chapterNamePattern.test(headingText)) {
             return;
           }
           flushChapter();
-          chapterTitle = clean;
+          chapterTitle = headingText;
           return;
         }
+
+        // 4. In Markdown, dividers (---, ***, ___) become their own standalone blocks
+        if (isMdFile && (trimmed === '---' || trimmed === '***' || trimmed === '___')) {
+          flushParagraph();
+          blocks.push(trimmed);
+          return;
+        }
+
         if (!trimmed) {
           if (blankSeparated) flushParagraph();
           return;
         }
+
+        // 5. In Markdown, subheadings (##, ###, etc.) within a chapter become standalone blocks
+        if (isMdFile && /^#{2,6}\s+/.test(trimmed)) {
+          flushParagraph();
+          blocks.push(trimmed);
+          return;
+        }
+
+        // 6. In Markdown, Callouts (> [!NOTE] etc.) starting line flushes prior buffer
+        if (isMdFile && /^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i.test(trimmed)) {
+          flushParagraph();
+          buffer.push(line);
+          return;
+        }
+
         if (blankSeparated) {
           buffer.push(line.replace(/\s+$/, ''));
           if (buffer.join('\n').length > 5200) flushParagraph();
@@ -692,15 +808,222 @@
       return {
         id: 'local-' + Date.now().toString(36) + '-' + (seed % 99991).toString(36),
         title: title,
-        author: '本地导入',
+        author: author,
         subtitle: '本地文本',
         description: '从本地导入的文本，保存在此浏览器中。',
         tags: ['本地导入'],
         source: 'local',
+        format: isMdFile ? 'markdown' : 'txt',
         addedAt: Date.now(),
         cover: cover,
         chapters: finalChapters,
       };
+    }
+
+    function parseMarkdownTable(text) {
+      if (!text || typeof text !== 'string') return null;
+      const lines = text.trim().split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+      if (lines.length < 2) return null;
+
+      function splitRow(line) {
+        let clean = line;
+        if (clean.startsWith('|')) clean = clean.slice(1);
+        if (clean.endsWith('|')) clean = clean.slice(0, -1);
+        return clean.split('|').map(function(c) { return c.trim(); });
+      }
+
+      const headerCells = splitRow(lines[0]);
+      const sepCells = splitRow(lines[1]);
+      if (!sepCells.length || !sepCells.every(function(c) { return /^:?-+:?$/.test(c); })) {
+        return null;
+      }
+
+      const alignments = sepCells.map(function(c) {
+        const left = c.startsWith(':');
+        const right = c.endsWith(':');
+        if (left && right) return 'center';
+        if (right) return 'right';
+        return 'left';
+      });
+
+      const bodyRows = [];
+      for (let i = 2; i < lines.length; i++) {
+        const cells = splitRow(lines[i]);
+        bodyRows.push(cells);
+      }
+
+      return {
+        headers: headerCells.map(function(headerText, i) {
+          return { text: headerText, align: alignments[i] || 'left' };
+        }),
+        rows: bodyRows.map(function(row) {
+          return row.map(function(cell, i) {
+            return { text: cell, align: alignments[i] || 'left' };
+          });
+        }),
+      };
+    }
+
+    function parseMarkdownList(text) {
+      if (!text || typeof text !== 'string') return null;
+      const lines = text.trim().split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+      if (!lines.length) return null;
+
+      const isUl = lines.every(function(l) { return /^[-*+]\s+/.test(l); });
+      const isOl = lines.every(function(l) { return /^\d+\.\s+/.test(l); });
+      if (!isUl && !isOl) return null;
+
+      let hasTask = false;
+      const items = lines.map(function(line) {
+        if (isUl) {
+          const taskMatch = line.match(/^[-*+]\s+\[([ xX])\]\s+(.*)$/);
+          if (taskMatch) {
+            hasTask = true;
+            return {
+              isTask: true,
+              checked: taskMatch[1].toLowerCase() === 'x',
+              text: taskMatch[2],
+            };
+          }
+          return {
+            isTask: false,
+            text: line.replace(/^[-*+]\s+/, ''),
+          };
+        } else {
+          return {
+            isTask: false,
+            text: line.replace(/^\d+\.\s+/, ''),
+          };
+        }
+      });
+
+      return { isOrdered: isOl, hasTask: hasTask, items: items };
+    }
+
+    function parseMarkdownCallout(text) {
+      if (!text || typeof text !== 'string') return null;
+      const lines = text.trim().split('\n').map(function(l) { return l.trim(); });
+      if (!lines.length) return null;
+      const first = lines[0];
+      const m = first.match(/^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/i);
+      if (!m) return null;
+      const type = m[1].toLowerCase();
+      const bodyLines = lines.slice(1).map(function(l) {
+        return l.replace(/^>\s?/, '');
+      });
+      return { type: type, lines: bodyLines };
+    }
+
+    function renderInline(text, keyPrefix) {
+      if (!text) return [text];
+      if (typeof text !== 'string') return [text];
+      if (!/[*_~`$\[]/.test(text)) return [text];
+
+      const tokenRegex = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*([^*]+)\*|_([^_]+)_|\$([^\$]+)\$)/g;
+      const nodes = [];
+      let lastIndex = 0;
+      let match;
+      let idx = 0;
+
+      while ((match = tokenRegex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          nodes.push(text.slice(lastIndex, match.index));
+        }
+        const k = (keyPrefix || 'md') + '-' + (idx++);
+        if (match[2] !== undefined) {
+          nodes.push(h('strong', { key: k }, match[2]));
+        } else if (match[3] !== undefined) {
+          nodes.push(h('strong', { key: k }, match[3]));
+        } else if (match[4] !== undefined) {
+          nodes.push(h('del', { key: k }, match[4]));
+        } else if (match[5] !== undefined) {
+          nodes.push(h('code', { key: k }, match[5]));
+        } else if (match[6] !== undefined) {
+          const linkHref = match[7];
+          const isSafe = /^https?:\/\//i.test(linkHref) || /^mailto:/i.test(linkHref) || linkHref.startsWith('#');
+          nodes.push(h('a', {
+            key: k,
+            className: 'sr-link',
+            href: isSafe ? linkHref : undefined,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            onClick: function(e) { e.stopPropagation(); },
+          }, match[6]));
+        } else if (match[8] !== undefined) {
+          nodes.push(h('em', { key: k }, match[8]));
+        } else if (match[9] !== undefined) {
+          nodes.push(h('em', { key: k }, match[9]));
+        } else if (match[10] !== undefined) {
+          nodes.push(h('span', { key: k, className: 'sr-math-inline' }, h('code', null, match[10])));
+        }
+        lastIndex = tokenRegex.lastIndex;
+      }
+      if (lastIndex < text.length) {
+        nodes.push(text.slice(lastIndex));
+      }
+      return nodes.length ? nodes : [text];
+    }
+
+    function injectHighlightIntoHtml(html, start, end, hl) {
+      let plainIndex = 0;
+      let inTag = false;
+      let result = '';
+      let markOpen = false;
+      const colorVal = hl.colorVal || '#f6c343';
+      const openTag = '<mark class="sr-hl" data-hl="' + hl.id + '" data-style="' + (hl.style || 'highlight') + '" data-note="' + (hl.note ? 'true' : 'false') + '" style="--sr-hl: ' + colorVal + '">';
+      const closeTag = '</mark>';
+
+      for (let i = 0; i < html.length; i++) {
+        const char = html[i];
+        if (char === '<') {
+          inTag = true;
+          if (markOpen) { result += closeTag; markOpen = false; }
+          result += char;
+          continue;
+        }
+        if (char === '>') {
+          inTag = false;
+          result += char;
+          continue;
+        }
+        if (inTag) {
+          result += char;
+          continue;
+        }
+
+        if (!markOpen && plainIndex >= start && plainIndex < end) {
+          result += openTag;
+          markOpen = true;
+        }
+        result += char;
+        plainIndex++;
+        if (markOpen && plainIndex >= end) {
+          result += closeTag;
+          markOpen = false;
+        }
+      }
+      if (markOpen) result += closeTag;
+      return result;
+    }
+
+    function applyHtmlHighlights(html, base, highlights) {
+      if (!highlights || !highlights.length) return html;
+      const sorted = highlights.slice().sort(function(a, b) { return b.start - a.start; });
+      let currentHtml = html;
+      sorted.forEach(function(h) {
+        const s = Math.max(0, h.start - base);
+        const e = Math.max(0, h.end - base);
+        if (e > s) {
+          const color = HIGHLIGHT_COLORS.find(function(entry) { return entry.id === h.color; }) || HIGHLIGHT_COLORS[0];
+          currentHtml = injectHighlightIntoHtml(currentHtml, s, e, {
+            id: h.id,
+            colorVal: color.value,
+            style: h.style,
+            note: h.note,
+          });
+        }
+      });
+      return currentHtml;
     }
 
     function defaultState() {
@@ -720,6 +1043,7 @@
           speechRate: 1,
           speechVoice: '',
           textAlign: 'justify',
+          readingRuler: false,
         },
         customBooks: [],
         progress: {},
@@ -760,6 +1084,7 @@
         speechRate: clamp(Number(value.speechRate) || 1, 0.5, 2),
         speechVoice: typeof value.speechVoice === 'string' ? value.speechVoice.slice(0, 200) : '',
         textAlign: value.textAlign === 'left' ? 'left' : 'justify',
+        readingRuler: value.readingRuler === true,
       };
     }
 
@@ -2096,8 +2421,13 @@
       const known = Array.isArray(ids) ? ids : [];
       const collected = [];
       let current = null;
+      let inCodeBlock = false;
       raw.split('\n').forEach(function each(line) {
-        const heading = /^#\s+(.+?)\s*$/.exec(line);
+        const trimmed = line.trim();
+        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+          inCodeBlock = !inCodeBlock;
+        }
+        const heading = !inCodeBlock && /^#\s+(.+?)\s*$/.exec(line);
         if (heading) {
           current = { title: heading[1].slice(0, 120), lines: [] };
           collected.push(current);
@@ -2190,9 +2520,9 @@
       return stripDiskBackedBodies(state, !!fsDirectory);
     }
 
-    // `人间词话--local-3f9a.txt` and its two siblings: the id after `--` is the
+    // `人间词话--local-3f9a.txt` and its siblings: the id after `--` is the
     // stable part of a book's file names, the title in front of it is not.
-    const ORPHAN_NAME = /--([A-Za-z0-9._-]+)\.(?:txt|json|epub|assets)$/i;
+    const ORPHAN_NAME = /--([A-Za-z0-9._-]+)\.(?:txt|md|json|epub|assets)$/i;
 
     // Files with no matching book — left behind by a delete that could not reach
     // the folder. Filenames are sanitized the same way the writer names them.

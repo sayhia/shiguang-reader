@@ -182,6 +182,8 @@
     }
 
     function fsBodyFileName(book) {
+      const format = (book && book.format) || (book && /\.md$/i.test(book.title) ? 'markdown' : 'txt');
+      if (format === 'markdown') return fsBookStem(book) + '.md';
       return fsBookStem(book) + '.txt';
     }
 
@@ -195,6 +197,10 @@
 
     function fsBodySuffix(id) {
       return '--' + fsIdToken(id) + '.txt';
+    }
+
+    function fsMdSuffix(id) {
+      return '--' + fsIdToken(id) + '.md';
     }
 
     function fsAssetsSuffix(id) {
@@ -616,9 +622,10 @@
       }
       if (!file) {
         const suffix = fsBodySuffix(id);
+        const mdSuffix = fsMdSuffix(id);
         let bodyName = '';
         for await (const entry of directory.values()) {
-          if (entry.kind === 'file' && entry.name.endsWith(suffix)) {
+          if (entry.kind === 'file' && (entry.name.endsWith(suffix) || entry.name.endsWith(mdSuffix))) {
             bodyName = entry.name;
             break;
           }
@@ -651,12 +658,14 @@
         directory = null;
       }
       const bodySuffix = fsBodySuffix(id);
+      const mdSuffix = fsMdSuffix(id);
       const sourceSuffix = fsSourceSuffix(id);
       const assetsSuffix = fsAssetsSuffix(id);
       const doomed = [];
       if (directory) {
         for await (const entry of directory.values()) {
           const match = entry.name.endsWith(bodySuffix)
+            || entry.name.endsWith(mdSuffix)
             || entry.name.endsWith(sourceSuffix)
             || entry.name.endsWith(assetsSuffix);
           if (match) doomed.push({ name: entry.name, directory: entry.kind === 'directory' });

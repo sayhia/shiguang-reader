@@ -261,6 +261,18 @@
       return out.join('/');
     }
 
+    const ALLOWED_EPUB_INLINE_TAGS = new Set([
+      'strong', 'b', 'em', 'i', 's', 'del', 'u', 'code',
+      'ruby', 'rt', 'rp', 'small', 'sub', 'sup', 'a', 'abbr', 'span', 'br',
+      'cite', 'q', 'mark'
+    ]);
+
+    const PRESERVED_EPUB_BLOCK_TAGS = new Set([
+      'table', 'thead', 'tbody', 'tr', 'th', 'td',
+      'blockquote', 'pre', 'ul', 'ol', 'li', 'figure', 'figcaption', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr',
+      'aside'
+    ]);
+
     function extractEpubChapter(rawHtml, fallbackTitle) {
       const source = String(rawHtml || '');
       const titleMatch = source.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
@@ -272,7 +284,9 @@
         .replace(/<\?xml[\s\S]*?\?>/gi, '')
         .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
         .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<(script|style|head|svg|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, '');
+        .replace(/<(script|style|head|noscript|meta|link|svg)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+        .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+
       // Pictures are lifted out before the tags go: each one becomes a paragraph of
       // its own holding a placeholder, so the picture keeps its place in the text
       // instead of vanishing with the markup. The placeholder is resolved to a real
@@ -284,16 +298,57 @@
         pictures.push({ src: attrs.src, alt: attrs.alt || attrs.title || '' });
         return '\n\n\u0000img:' + (pictures.length - 1) + '\u0000\n\n';
       });
-      html = html.replace(/<br\s*\/?>/gi, '\n');
-      html = html.replace(/<\/(?:p|div|h[1-6]|li|tr|section|article|blockquote|figcaption|td|th|dd|dt|pre)>/gi, '\n\n');
-      html = html.replace(/<(?:p|div|h[1-6]|li|tr|section|article|blockquote|figcaption|td|th|dd|dt|pre)\b[^>]*>/gi, '\n\n');
-      html = html.replace(/<[^>]*>/g, '');
-      html = decodeEpubEntities(html).replace(/\u00a0/g, ' ');
-      html = html.replace(/\r\n?/g, '\n');
-      const lines = html.split('\n').map(function clean(line) { return line.replace(/[ \t]+/g, ' ').trim(); });
-      let cleaned = lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+      const bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+      let content = bodyMatch ? bodyMatch[1] : html;
+
+      // Preserve block boundaries for containers
+      content = content
+        .replace(/<\/(table|blockquote|pre|ul|ol|figure|aside|h[1-6])>/gi, '$&\n\n')
+        .replace(/<(table|blockquote|pre|ul|ol|figure|aside|h[1-6])\b[^>]*>/gi, '\n\n$&')
+        .replace(/<\/(?:p|div|section|article)>/gi, '\n\n')
+        .replace(/<(?:p|div|section|article)\b([^>]*)>/gi, function keepContainerId(match, attrs) {
+          const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
+          const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
+          if (idMatch) {
+            const safeType = epubTypeMatch ? ' ' + epubTypeMatch[0] : '';
+            return '\n\n<span ' + idMatch[0] + safeType + '></span>';
+          }
+          return '\n\n';
+        });
+
+      // Sanitize attributes and preserve allowed tags (ruby, strong, em, table, etc.)
+      content = content.replace(/<\/?([a-z0-9]+)\b([^>]*)>/gi, function keepTag(match, tagName, attrs) {
+        const tag = tagName.toLowerCase();
+        if (ALLOWED_EPUB_INLINE_TAGS.has(tag) || PRESERVED_EPUB_BLOCK_TAGS.has(tag)) {
+          if (match.startsWith('</')) return '</' + tag + '>';
+          let safeAttrs = '';
+          const hrefMatch = attrs.match(/\bhref\s*=\s*("[^"]*"|'[^']*')/i);
+          const classMatch = attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
+          const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
+          const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
+          const alignMatch = attrs.match(/\balign\s*=\s*("[^"]*"|'[^']*')/i);
+          const colspanMatch = attrs.match(/\bcolspan\s*=\s*("[^"]*"|'[^']*')/i);
+          const rowspanMatch = attrs.match(/\browspan\s*=\s*("[^"]*"|'[^']*')/i);
+          if (hrefMatch) safeAttrs += ' ' + hrefMatch[0];
+          if (classMatch) safeAttrs += ' ' + classMatch[0];
+          if (idMatch) safeAttrs += ' ' + idMatch[0];
+          if (epubTypeMatch) safeAttrs += ' ' + epubTypeMatch[0];
+          if (alignMatch) safeAttrs += ' ' + alignMatch[0];
+          if (colspanMatch) safeAttrs += ' ' + colspanMatch[0];
+          if (rowspanMatch) safeAttrs += ' ' + rowspanMatch[0];
+          return '<' + tag + safeAttrs + '>';
+        }
+        return '';
+      });
+
+      content = decodeEpubEntities(content).replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
+      const lines = content.split('\n').map(function clean(line) { return line.replace(/[ \t]+/g, ' ').trim(); });
+      const cleaned = lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
       let paragraphs = cleaned.split(/\n{2,}/).map(function trim(value) { return value.replace(/[ \t]+/g, ' ').trim(); }).filter(Boolean);
-      if (paragraphs.length && collapseWhitespace(paragraphs[0]) === collapseWhitespace(title)) paragraphs = paragraphs.slice(1);
+      if (paragraphs.length && collapseWhitespace(stripHtmlTags(paragraphs[0])) === collapseWhitespace(title)) {
+        paragraphs = paragraphs.slice(1);
+      }
       if (!paragraphs.length) return { title: title, paragraphs: [], pictures: pictures };
       return { title: title, paragraphs: paragraphs, pictures: pictures };
     }
