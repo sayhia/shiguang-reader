@@ -3290,6 +3290,12 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   width:100%;box-sizing:border-box;
   padding:83px clamp(30px,7vw,96px) 77px;
 }
+[data-theme="night"] .sr-page-area::before,
+[data-theme="oled"] .sr-page-area::before{
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:15;
+  background:radial-gradient(ellipse at center, transparent 72%, rgba(0,0,0,0.28) 100%);
+  opacity:.5;
+}
 .sr-page-edge{
   position:absolute;top:50%;transform:translateY(-50%);z-index:10;
   display:inline-flex;align-items:center;justify-content:center;
@@ -3445,8 +3451,8 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   margin:calc(var(--sr-para-gap,.9em) * .8) 0;padding-left:1.8em;text-indent:0;
 }
 .sr-columns li{margin-bottom:.35em;line-height:1.8;text-indent:0;}
-.sr-columns ruby{font-size:1em;ruby-position:over;}
-.sr-columns rt{font-size:.52em;color:var(--sr-muted);font-weight:400;letter-spacing:0;text-indent:0;line-height:1;}
+.sr-columns ruby{font-size:1em;ruby-position:over;ruby-align:center;}
+.sr-columns rt{font-size:.52em;color:var(--sr-muted);font-weight:400;letter-spacing:0;text-indent:0;line-height:1;user-select:none;-webkit-user-select:none;}
 .sr-table-wrap{max-width:100%;overflow-x:auto;margin:calc(var(--sr-para-gap,.9em) * 1.2) 0;break-inside:avoid;-webkit-overflow-scrolling:touch;}
 .sr-columns table{
   width:100%;margin:calc(var(--sr-para-gap,.9em) * 1.2) 0;
@@ -14245,7 +14251,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         dismissPopovers();
         if (!keepDrawer) setDrawer(null);
         setSettingsOpen(false);
-        setChrome(true);
+        if (mode !== 'start' && mode !== 'last') setChrome(true);
         const targetChapter = chapters[index];
         let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
         if (mode === 'resume') {
@@ -14778,6 +14784,15 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         };
       }, []);
 
+      useEffect(function preloadNextChapter() {
+        if (chapterIndex < chapters.length - 1 && page >= Math.max(0, pageCount - 2)) {
+          const nextChapter = chapters[chapterIndex + 1];
+          if (nextChapter && Array.isArray(nextChapter.paragraphs)) {
+            chapterBaseOffsets(nextChapter);
+          }
+        }
+      }, [chapterIndex, chapters, page, pageCount]);
+
       useEffect(function focusSearch() {
         if (drawer !== 'search') return undefined;
         const frame = window.requestAnimationFrame(function focus() {
@@ -14953,7 +14968,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         if (!text.trim()) return;
         suppressNextClick();
         const rect = range.getBoundingClientRect();
-        const position = popoverPosition(rect, 188);
+        const position = popoverPosition(rect, 215);
         setSelectionColor(null);
         setToolbar({
           start: startOffset,
@@ -14994,6 +15009,15 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         if (ratio < 0.24) prevPage();
         else if (ratio > 0.76) nextPage();
         else setChrome(function toggle(value) { return !value; });
+      }
+
+      function handleStageDoubleClick(event) {
+        const target = event.target;
+        if (target && typeof target.closest === 'function' && target.closest('a,button,mark[data-hl],input,textarea,.sr-figure-zoom')) return;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return;
+        event.preventDefault();
+        toggleFullscreen();
       }
 
       function createHighlightFromToolbar() {
@@ -15047,6 +15071,15 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         } catch (error) {
           props.showToast(t('copied'));
         }
+        setToolbar(null);
+      }
+
+      async function copyToolbarQuote() {
+        if (!toolbar) return;
+        const text = toolbar.text;
+        const quote = buildQuoteText(text, book.title, chapter.title);
+        const ok = await copyTextToClipboard(quote);
+        props.showToast(ok ? t('quoteCopied') : t('copyFailed'));
         setToolbar(null);
       }
 
@@ -15508,6 +15541,17 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
                           h('span', { className: 'sr-drawer-note-meta' }, (noteChapter ? noteChapter.title : '') + ' · ' + dateLabel(note.createdAt)),
                           h('div', { className: 'sr-drawer-note-actions' },
                             h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToHighlight(note); } }, t('jumpToText')),
+                            h('button', {
+                              type: 'button',
+                              className: 'sr-mini-action',
+                              title: t('copyQuote'),
+                              onClick: function copy() {
+                                const quote = buildQuoteText(note.text, book.title, noteChapter ? noteChapter.title : '');
+                                copyTextToClipboard(quote).then(function done(ok) {
+                                  props.showToast(ok ? t('quoteCopied') : t('copyFailed'));
+                                });
+                              },
+                            }, t('copyQuote')),
                             h('button', { type: 'button', className: 'sr-mini-action', onClick: function edit() { openThoughtEditor(note); } }, note.note ? t('editThought') : t('addNote')),
                             h('button', { type: 'button', className: 'sr-mini-action', 'data-danger': 'true', onClick: function remove() { props.deleteHighlight(note.id); } }, t('delete')),
                           ),
@@ -16490,6 +16534,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
               }
             },
             onClick: handleStageClick,
+            onDoubleClick: handleStageDoubleClick,
           },
             rulerOpen ? h('div', {
               className: 'sr-reading-ruler',
@@ -16767,6 +16812,10 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
           h('button', { type: 'button', className: 'sr-sel-btn', title: t('selectionCopy'), onClick: copyToolbarText },
             h(Icon, { name: 'copy', size: 13 }),
             h('span', null, t('selectionCopy')),
+          ),
+          h('button', { type: 'button', className: 'sr-sel-btn', title: t('copyQuote'), onClick: copyToolbarQuote },
+            h(Icon, { name: 'quote', size: 13 }),
+            h('span', null, t('copyQuote')),
           ),
           h('span', { className: 'sr-sel-divider', 'aria-hidden': 'true' }),
           h('button', { type: 'button', className: 'sr-sel-btn', title: t('searchInBook'), onClick: searchSelectionText },

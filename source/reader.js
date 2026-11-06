@@ -202,7 +202,7 @@
         dismissPopovers();
         if (!keepDrawer) setDrawer(null);
         setSettingsOpen(false);
-        setChrome(true);
+        if (mode !== 'start' && mode !== 'last') setChrome(true);
         const targetChapter = chapters[index];
         let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
         if (mode === 'resume') {
@@ -735,6 +735,15 @@
         };
       }, []);
 
+      useEffect(function preloadNextChapter() {
+        if (chapterIndex < chapters.length - 1 && page >= Math.max(0, pageCount - 2)) {
+          const nextChapter = chapters[chapterIndex + 1];
+          if (nextChapter && Array.isArray(nextChapter.paragraphs)) {
+            chapterBaseOffsets(nextChapter);
+          }
+        }
+      }, [chapterIndex, chapters, page, pageCount]);
+
       useEffect(function focusSearch() {
         if (drawer !== 'search') return undefined;
         const frame = window.requestAnimationFrame(function focus() {
@@ -910,7 +919,7 @@
         if (!text.trim()) return;
         suppressNextClick();
         const rect = range.getBoundingClientRect();
-        const position = popoverPosition(rect, 188);
+        const position = popoverPosition(rect, 215);
         setSelectionColor(null);
         setToolbar({
           start: startOffset,
@@ -951,6 +960,15 @@
         if (ratio < 0.24) prevPage();
         else if (ratio > 0.76) nextPage();
         else setChrome(function toggle(value) { return !value; });
+      }
+
+      function handleStageDoubleClick(event) {
+        const target = event.target;
+        if (target && typeof target.closest === 'function' && target.closest('a,button,mark[data-hl],input,textarea,.sr-figure-zoom')) return;
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return;
+        event.preventDefault();
+        toggleFullscreen();
       }
 
       function createHighlightFromToolbar() {
@@ -1004,6 +1022,15 @@
         } catch (error) {
           props.showToast(t('copied'));
         }
+        setToolbar(null);
+      }
+
+      async function copyToolbarQuote() {
+        if (!toolbar) return;
+        const text = toolbar.text;
+        const quote = buildQuoteText(text, book.title, chapter.title);
+        const ok = await copyTextToClipboard(quote);
+        props.showToast(ok ? t('quoteCopied') : t('copyFailed'));
         setToolbar(null);
       }
 
@@ -1465,6 +1492,17 @@
                           h('span', { className: 'sr-drawer-note-meta' }, (noteChapter ? noteChapter.title : '') + ' · ' + dateLabel(note.createdAt)),
                           h('div', { className: 'sr-drawer-note-actions' },
                             h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToHighlight(note); } }, t('jumpToText')),
+                            h('button', {
+                              type: 'button',
+                              className: 'sr-mini-action',
+                              title: t('copyQuote'),
+                              onClick: function copy() {
+                                const quote = buildQuoteText(note.text, book.title, noteChapter ? noteChapter.title : '');
+                                copyTextToClipboard(quote).then(function done(ok) {
+                                  props.showToast(ok ? t('quoteCopied') : t('copyFailed'));
+                                });
+                              },
+                            }, t('copyQuote')),
                             h('button', { type: 'button', className: 'sr-mini-action', onClick: function edit() { openThoughtEditor(note); } }, note.note ? t('editThought') : t('addNote')),
                             h('button', { type: 'button', className: 'sr-mini-action', 'data-danger': 'true', onClick: function remove() { props.deleteHighlight(note.id); } }, t('delete')),
                           ),
@@ -2447,6 +2485,7 @@
               }
             },
             onClick: handleStageClick,
+            onDoubleClick: handleStageDoubleClick,
           },
             rulerOpen ? h('div', {
               className: 'sr-reading-ruler',
@@ -2724,6 +2763,10 @@
           h('button', { type: 'button', className: 'sr-sel-btn', title: t('selectionCopy'), onClick: copyToolbarText },
             h(Icon, { name: 'copy', size: 13 }),
             h('span', null, t('selectionCopy')),
+          ),
+          h('button', { type: 'button', className: 'sr-sel-btn', title: t('copyQuote'), onClick: copyToolbarQuote },
+            h(Icon, { name: 'quote', size: 13 }),
+            h('span', null, t('copyQuote')),
           ),
           h('span', { className: 'sr-sel-divider', 'aria-hidden': 'true' }),
           h('button', { type: 'button', className: 'sr-sel-btn', title: t('searchInBook'), onClick: searchSelectionText },
