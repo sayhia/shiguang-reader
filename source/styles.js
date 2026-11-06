@@ -1829,6 +1829,9 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   background:color-mix(in srgb,var(--sr-hl) 25%,transparent);
   border-bottom:1.5px dashed color-mix(in srgb,var(--sr-hl) 88%,transparent);
 }
+.sr-hl[data-style="underline"]{background:transparent !important;box-shadow:none !important;border-bottom:2px solid var(--sr-hl) !important;padding-bottom:1px;}
+.sr-hl[data-style="wavy"]{background:transparent !important;box-shadow:none !important;text-decoration:underline wavy var(--sr-hl) !important;text-underline-offset:3.5px;}
+.sr-hl[data-style="strike"]{background:transparent !important;box-shadow:none !important;text-decoration:line-through var(--sr-hl) !important;opacity:.82;}
 .sr-reader-bottom{
   position:absolute;z-index:14;left:0;right:0;bottom:16px;
   display:flex;align-items:center;justify-content:center;padding:0 clamp(16px,2.8vw,32px);
@@ -2071,7 +2074,9 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 @media (hover: none){.sr-bookmark-row .sr-mini-action{opacity:.8;}}
 .sr-drawer-empty{padding:45px 20px;text-align:center;color:var(--sr-muted);font-size:11px;line-height:1.7;}
 .sr-drawer-empty svg{opacity:.45;margin-bottom:7px;}
-.sr-drawer-foot{flex:none;padding:11px 18px 15px;border-top:1px solid var(--sr-line);font-size:9px;color:var(--sr-muted);text-align:center;letter-spacing:.02em;}
+.sr-drawer-foot{flex:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px 18px 15px;border-top:1px solid var(--sr-line);font-size:9px;color:var(--sr-muted);letter-spacing:.02em;}
+.sr-export-notes-btn{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;font-weight:600;color:var(--sr-accent);border:1px solid color-mix(in srgb,var(--sr-accent) 30%,var(--sr-line));border-radius:6px;padding:3px 8px;background:var(--sr-wash);cursor:pointer;transition:all .14s ease;}
+.sr-export-notes-btn:hover{background:color-mix(in srgb,var(--sr-accent) 20%,transparent);color:var(--sr-accent);}
 .sr-drawer--search{width:min(438px,94%);}
 .sr-search-body{padding:12px 14px 30px;display:flex;flex-direction:column;}
 .sr-search-field{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:7px;flex:none;padding:8px 12px;margin:0 0 12px;border:1px solid color-mix(in srgb,var(--sr-line) 80%,transparent);border-radius:999px;background:color-mix(in srgb,var(--sr-panel) 95%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);box-shadow:0 4px 14px -6px rgba(0,0,0,.15);}
@@ -2340,6 +2345,10 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 }
 .sr-hl-peek-quote{margin:0;font-family:${SERIF_FONT};font-size:12px;line-height:1.75;max-height:92px;overflow:hidden;white-space:pre-wrap;border-left:2.5px solid var(--sr-hl,var(--sr-accent,var(--dsw-alias-brand-primary)));padding-left:9px;}
 .sr-hl-peek-note{margin:8px 0 0;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--sr-ink,var(--dsw-alias-label-primary)) 6%,transparent);font-size:11px;line-height:1.65;white-space:pre-wrap;}
+.sr-hl-peek-styles{display:flex;align-items:center;gap:3px;margin:8px 0 2px;}
+.sr-hl-peek-style-btn{flex:1;height:22px;padding:0 4px;border:1px solid color-mix(in srgb,var(--sr-line,var(--dsw-alias-border-l1)) 75%,transparent);border-radius:5px;background:transparent;color:var(--sr-muted,var(--dsw-alias-label-secondary));font-family:${UI_FONT};font-size:9.5px;font-weight:550;cursor:pointer;transition:all .12s ease;text-align:center;}
+.sr-hl-peek-style-btn:hover{color:var(--sr-ink,var(--dsw-alias-label-primary));background:color-mix(in srgb,var(--sr-ink,var(--dsw-alias-label-primary)) 6%,transparent);}
+.sr-hl-peek-style-btn[data-active="true"]{color:var(--sr-accent,var(--dsw-alias-brand-primary));background:var(--sr-wash);border-color:color-mix(in srgb,var(--sr-accent,var(--dsw-alias-brand-primary)) 45%,var(--sr-line,var(--dsw-alias-border-l1)));font-weight:600;}
 .sr-hl-peek-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid color-mix(in srgb,var(--sr-line,var(--dsw-alias-border-l1)) 65%,transparent);}
 .sr-hl-peek-colors{display:flex;align-items:center;gap:5px;flex:none;}
 .sr-hl-peek-colors .sr-color-dot{width:13px;height:13px;border-radius:50%;border:0;cursor:pointer;padding:0;transition:transform .12s ease;}

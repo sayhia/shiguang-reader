@@ -1210,6 +1210,7 @@
               key: 'hl-' + item.item.id + '-' + start,
               className: 'sr-hl',
               'data-hl': item.item.id,
+              'data-style': item.item.style || 'highlight',
               'data-note': item.item.note ? 'true' : 'false',
               style: { '--sr-hl': color.value },
             }, text.slice(start, end)));
@@ -1335,7 +1336,35 @@
                     );
                   }),
               ),
-            h('div', { className: 'sr-drawer-foot' }, t('savedLocally')),
+            h('div', { className: 'sr-drawer-foot' },
+              h('span', null, t('savedLocally')),
+              bookHighlights.length > 0 || bookmarksForBook.length > 0 ? h('button', {
+                type: 'button',
+                className: 'sr-mini-action sr-export-notes-btn',
+                onClick: function exportNotes() {
+                  let md = '# 《' + (book.title || '') + '》' + (t('notes') || '笔记') + '\n\n';
+                  if (book.author) md += '> ' + t('author') + '：' + book.author + '\n\n';
+                  if (bookHighlights.length > 0) {
+                    md += '## ' + t('highlight') + ' (' + bookHighlights.length + ')\n\n';
+                    bookHighlights.slice().sort(function o(a, b) { return a.chapterIndex - b.chapterIndex || a.start - b.start; }).forEach(function entry(n) {
+                      const cTitle = chapters[n.chapterIndex] ? chapters[n.chapterIndex].title : '';
+                      md += '- **[' + cTitle + ']** ' + n.text.trim() + '\n';
+                      if (n.note) md += '  > 💭 ' + n.note.trim() + '\n';
+                      md += '\n';
+                    });
+                  }
+                  if (bookmarksForBook.length > 0) {
+                    md += '## ' + t('bookmark') + ' (' + bookmarksForBook.length + ')\n\n';
+                    bookmarksForBook.forEach(function bm(b) {
+                      md += '- **' + (b.chapterTitle || '') + '** (p.' + (b.page + 1) + ')' + (b.note ? '：' + b.note : '') + '\n';
+                    });
+                  }
+                  copyTextToClipboard(md).then(function done(ok) {
+                    props.showToast(ok ? t('exportNotesDone') : t('copyFailed'));
+                  });
+                },
+              }, h(Icon, { name: 'download', size: 11 }), h('span', null, t('exportNotesMd'))) : null,
+            ),
           ),
         );
       }
@@ -2502,6 +2531,26 @@
         },
           h('p', { className: 'sr-hl-peek-quote' }, peekHighlight.text),
           peekHighlight.note ? h('p', { className: 'sr-hl-peek-note' }, peekHighlight.note) : null,
+          h('div', { className: 'sr-hl-peek-styles', role: 'group', 'aria-label': t('styleHighlight') },
+            [
+              { id: 'highlight', label: t('styleHighlight') },
+              { id: 'underline', label: t('styleUnderline') },
+              { id: 'wavy', label: t('styleWavy') },
+              { id: 'strike', label: t('styleStrike') },
+            ].map(function styleBtn(s) {
+              const active = (peekHighlight.style || 'highlight') === s.id;
+              return h('button', {
+                key: s.id,
+                type: 'button',
+                className: 'sr-hl-peek-style-btn',
+                'data-active': active ? 'true' : 'false',
+                onClick: function setStyle() {
+                  if (active) return;
+                  props.updateHighlight(peekHighlight.id, { style: s.id });
+                },
+              }, s.label);
+            }),
+          ),
           h('div', { className: 'sr-hl-peek-foot' },
             h('div', { className: 'sr-hl-peek-colors', role: 'group', 'aria-label': t('highlightColor') },
               HIGHLIGHT_COLORS.map(function dot(c) {
