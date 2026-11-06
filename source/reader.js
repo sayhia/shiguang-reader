@@ -1232,12 +1232,15 @@
               t('imageMissing', { name: picture.name }));
           }
           const trimmed = text.trim();
+          const isDivider = trimmed === '***' || trimmed === '---' || trimmed === '———' || trimmed === '···' || trimmed === '❦' || trimmed === '~~~';
+          const isHeading = /^#{2,4}\s+/.test(trimmed);
           const verse = text.indexOf('\n') >= 0 && (trimmed.charAt(0) === '《' || trimmed.startsWith('诗') || trimmed.startsWith('——'));
-          const quote = trimmed.length > 20 && ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('「') && trimmed.endsWith('」')) || (trimmed.startsWith('『') && trimmed.endsWith('』')));
+          const quote = (trimmed.length > 20 && ((trimmed.startsWith('“') && trimmed.endsWith('”')) || (trimmed.startsWith('「') && trimmed.endsWith('」')) || (trimmed.startsWith('『') && trimmed.endsWith('』')))) || trimmed.startsWith('> ') || trimmed.startsWith('》');
+          const pClass = isDivider ? 'sr-divider' : (isHeading ? 'sr-subheading' : (verse ? 'sr-verse' : (quote ? 'sr-quote' : undefined)));
           return h('p', {
             key: index,
             'data-p': index,
-            className: verse ? 'sr-verse' : (quote ? 'sr-quote' : undefined),
+            className: pClass,
           }, segmentParagraph(text, offsets.offsets[index], chapterHighlights));
         });
       }, [chapter.id, chapter.paragraphs, chapter.images, chapterHighlights, offsets]);
