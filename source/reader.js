@@ -86,6 +86,9 @@
       const [chapterHud, setChapterHud] = useState(null);
       const [pageJumpOpen, setPageJumpOpen] = useState(false);
       const [pageJumpDraft, setPageJumpDraft] = useState('');
+      const [rulerOpen, setRulerOpen] = useState(false);
+      const [rulerY, setRulerY] = useState(160);
+      const [jumpReturn, setJumpReturn] = useState(null);
       // A picture in the page is often too small to actually read — a scan, a map,
       // a plate of calligraphy. Clicking one opens it full-screen.
       const [zoomImage, setZoomImage] = useState(null);
@@ -186,12 +189,13 @@
         setSettingsOpen(false);
         setChrome(true);
         const targetChapter = chapters[index];
-        let target = mode === 'last' ? 'last' : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
+        let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
         if (mode === 'resume') {
           target = chapterResumePercent(props.chapterMarks, targetChapter ? targetChapter.id : '');
         }
         if (index === chapterIndex) {
           if (target === 'last') setPage(Math.max(0, pageCount - 1));
+          else if (mode === 'page' && typeof percent === 'number') setPage(clamp(Math.round(percent), 0, Math.max(0, pageCount - 1)));
           else if (typeof target === 'number' && target > 0) setPage(Math.round(clamp(target, 0, 1) * Math.max(0, pageCount - 1)));
           else if (mode !== 'resume' || typeof percent === 'number') setPage(0);
           return;
@@ -439,6 +443,7 @@
         let target = pageRef.current;
         if (pendingRef.current !== null) {
           if (pendingRef.current === 'last') target = nextCount - 1;
+          else if (typeof pendingRef.current === 'object' && pendingRef.current && pendingRef.current.page !== undefined) target = clamp(pendingRef.current.page, 0, nextCount - 1);
           else target = Math.round(clamp(Number(pendingRef.current) || 0, 0, 1) * Math.max(0, nextCount - 1));
           pendingRef.current = null;
         } else {
@@ -546,6 +551,15 @@
             if (plainKey === 't') { event.preventDefault(); setDrawer('toc'); return; }
             if (plainKey === 'h') { event.preventDefault(); dismissPopovers(); setChrome(!chrome); return; }
             if (plainKey === 'f') { event.preventDefault(); toggleFullscreen(); return; }
+            if (plainKey === 'l') {
+              event.preventDefault();
+              setRulerOpen(function toggle(prev) {
+                const next = !prev;
+                props.showToast(next ? t('rulerOn') : t('rulerOff'));
+                return next;
+              });
+              return;
+            }
             if (plainKey === 'g') {
               event.preventDefault();
               dismissPopovers();
@@ -1297,7 +1311,7 @@
                         h('div', { className: 'sr-drawer-note-foot' },
                           h('span', { className: 'sr-drawer-note-meta' }, (noteChapter ? noteChapter.title : '') + ' · ' + dateLabel(note.createdAt)),
                           h('div', { className: 'sr-drawer-note-actions' },
-                            h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { jumpToHighlight(note); } }, t('jumpToText')),
+                            h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToHighlight(note); } }, t('jumpToText')),
                             h('button', { type: 'button', className: 'sr-mini-action', onClick: function edit() { openThoughtEditor(note); } }, note.note ? t('editThought') : t('addNote')),
                             h('button', { type: 'button', className: 'sr-mini-action', 'data-danger': 'true', onClick: function remove() { props.deleteHighlight(note.id); } }, t('delete')),
                           ),
@@ -1310,7 +1324,7 @@
                   ? h('div', { className: 'sr-drawer-empty' }, h(Icon, { name: 'bookmark', size: 24 }), h('div', null, t('noBookmarks')))
                   : bookmarksForBook.map(function bookmark(item) {
                     return h('div', { key: item.id, className: 'sr-bookmark-row' },
-                      h('button', { type: 'button', className: 'sr-bookmark-main', onClick: function jump() { goChapter(item.chapterIndex, 'percent', item.percent); } },
+                      h('button', { type: 'button', className: 'sr-bookmark-main', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); goChapter(item.chapterIndex, 'percent', item.percent); } },
                         h('strong', null, item.chapterTitle || (chapters[item.chapterIndex] ? chapters[item.chapterIndex].title : '')),
                         item.excerpt ? h('span', { className: 'sr-bookmark-excerpt' }, item.excerpt) : null,
                         item.note ? h('span', { className: 'sr-bookmark-note' }, item.note) : null,
@@ -1389,7 +1403,7 @@
                   title: item.current
                     ? t('currentChapter')
                     : (marked > 0 ? fill(t('tocReadPercent'), { n: Math.round(marked * 100) }) : ''),
-                  onClick: function open() { goChapter(item.index, 'resume'); },
+                  onClick: function open() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); goChapter(item.index, 'resume'); },
                 },
                   h('span', { className: 'sr-toc-num' }, item.read ? h(Icon, { name: 'check', size: 10 }) : String(item.index + 1).padStart(2, '0')),
                   h('span', { className: 'sr-toc-copy' },
@@ -1550,7 +1564,7 @@
                           type: 'button',
                           className: 'sr-search-result',
                           'data-active': index === searchCursor ? 'true' : 'false',
-                          onClick: function jump() { jumpToSearchResult(item, index); },
+                          onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToSearchResult(item, index); },
                         },
                           h('div', { className: 'sr-search-result-head' },
                             h('span', { className: 'sr-search-result-chapter' }, item.chapterTitle),
@@ -1838,6 +1852,7 @@
           { category: 'view', label: t('shortcutFont'), keys: ['-', '=', '0'] },
           { category: 'view', label: t('shortcutChrome'), keys: ['H'] },
           { category: 'view', label: t('shortcutFullscreen'), keys: ['F'] },
+          { category: 'view', label: t('shortcutRuler'), keys: ['L'] },
           { category: 'tools', label: t('shortcutSearch'), keys: ['⌘/Ctrl', 'F'] },
           { category: 'tools', label: t('searchNextHit') + ' / ' + t('searchPrevHit'), keys: ['↵', '⇧↵'] },
           { category: 'tools', label: t('shortcutBookmark'), keys: ['B'] },
@@ -2061,6 +2076,24 @@
               h(Icon, { name: 'chevron-left', size: 15 }),
               h('span', null, t('readerBack')),
             ),
+            jumpReturn ? h('button', {
+              type: 'button',
+              className: 'sr-jump-return',
+              title: fill(t('returnPreviousRead'), { n: jumpReturn.page + 1 }),
+              'aria-label': fill(t('returnPreviousRead'), { n: jumpReturn.page + 1 }),
+              onClick: function goBack() {
+                const prev = jumpReturn;
+                setJumpReturn(null);
+                if (prev.chapterIndex === chapterIndex) {
+                  setPage(prev.page);
+                } else {
+                  goChapter(prev.chapterIndex, 'page', prev.page);
+                }
+              },
+            },
+              h(Icon, { name: 'arrow-left', size: 12 }),
+              h('span', null, t('returnPreviousReadLabel')),
+            ) : null,
           ),
           h('div', { className: 'sr-reader-top-center' },
             h('button', {
@@ -2181,8 +2214,19 @@
             ref: stageRef,
             onPointerDown: handlePointerDown,
             onPointerUp: handlePointerUp,
+            onMouseMove: function handleMouseMove(e) {
+              if (rulerOpen && stageRef.current) {
+                const rect = stageRef.current.getBoundingClientRect();
+                setRulerY(clamp(e.clientY - rect.top, 24, Math.max(24, rect.height - 24)));
+              }
+            },
             onClick: handleStageClick,
           },
+            rulerOpen ? h('div', {
+              className: 'sr-reading-ruler',
+              style: { top: rulerY + 'px' },
+              'aria-hidden': 'true',
+            }) : null,
             currentBookmark ? h('button', {
               type: 'button',
               className: 'sr-page-bookmark-ribbon' + (currentBookmark.note ? ' sr-page-bookmark-ribbon--noted' : ''),
