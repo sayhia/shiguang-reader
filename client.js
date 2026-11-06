@@ -3604,6 +3604,26 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-chapter-end::before,.sr-chapter-end::after{
   content:"";flex:0 0 28px;height:1px;background:color-mix(in srgb,var(--sr-line) 85%,transparent);
 }
+.sr-chapter-end--next{
+  width:100%;appearance:none;border:0;border-radius:8px;background:transparent;
+  padding:.8em .5em .55em;color:var(--sr-muted);font:inherit;cursor:pointer;
+  opacity:.82;break-inside:avoid;transition:opacity .14s ease,background .14s ease,color .14s ease;
+}
+.sr-chapter-end--next:hover{
+  opacity:1;color:var(--sr-accent);
+  background:color-mix(in srgb,var(--sr-accent) 7%,transparent);
+}
+.sr-chapter-end--next:focus-visible{outline:2px solid var(--sr-accent);outline-offset:2px;}
+.sr-chapter-end-next{
+  display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:min(100%,420px);
+  font-family:${UI_FONT};font-size:10.5px;letter-spacing:.04em;text-transform:none;
+  color:var(--sr-accent);white-space:nowrap;
+}
+.sr-chapter-end-next strong{
+  min-width:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:${SERIF_FONT};font-size:11.5px;font-weight:600;letter-spacing:.03em;color:var(--sr-ink);
+}
+.sr-chapter-end--next svg{flex:none;}
 .sr-chapter-end--book{
   flex-direction:column;gap:5px;margin-top:2.2em;padding:1.4em 0;
   border-top:1px dashed color-mix(in srgb,var(--sr-line) 75%,transparent);
@@ -18048,7 +18068,24 @@ aside.sr-aside-note{
                       h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
                       h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
                     )
-                  : h('div', { className: 'sr-chapter-end', ref: endRef }, '· ' + t('chapterEnd') + ' ·'),
+                  : h('button', {
+                      type: 'button',
+                      className: 'sr-chapter-end sr-chapter-end--next',
+                      ref: endRef,
+                      title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+                      'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+                      onClick: function nextChapter(event) {
+                        event.stopPropagation();
+                        goChapter(chapterIndex + 1, 'start');
+                      },
+                    },
+                      h('span', null, '· ' + t('chapterEnd') + ' ·'),
+                      h('span', { className: 'sr-chapter-end-next' },
+                        h('span', null, t('nextChapter')),
+                        h('strong', null, chapters[chapterIndex + 1].title),
+                        h(Icon, { name: 'chevron-right', size: 11 }),
+                      ),
+                    ),
               ),
             ),
           ),

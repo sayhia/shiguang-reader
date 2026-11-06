@@ -3077,7 +3077,24 @@
                       h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
                       h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
                     )
-                  : h('div', { className: 'sr-chapter-end', ref: endRef }, '· ' + t('chapterEnd') + ' ·'),
+                  : h('button', {
+                      type: 'button',
+                      className: 'sr-chapter-end sr-chapter-end--next',
+                      ref: endRef,
+                      title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+                      'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+                      onClick: function nextChapter(event) {
+                        event.stopPropagation();
+                        goChapter(chapterIndex + 1, 'start');
+                      },
+                    },
+                      h('span', null, '· ' + t('chapterEnd') + ' ·'),
+                      h('span', { className: 'sr-chapter-end-next' },
+                        h('span', null, t('nextChapter')),
+                        h('strong', null, chapters[chapterIndex + 1].title),
+                        h(Icon, { name: 'chevron-right', size: 11 }),
+                      ),
+                    ),
               ),
             ),
           ),
