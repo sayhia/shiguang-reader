@@ -717,18 +717,23 @@
       if (file) {
         const fileName = String((file && file.name) || bodyName || '');
         if (fileName.endsWith('.epub')) {
-          const raw = await file.getFile();
-          const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
-          const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
-          const parsed = await parseEpubBook((book && book.title) || fileName.replace(/\.epub$/i, ''), input, options);
-          if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
-            if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
-              parsed.chapters.forEach(function mapId(c, i) {
-                if (known[i]) c.id = known[i];
-              });
+          try {
+            const raw = await file.getFile();
+            const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
+            const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
+            const parsed = await parseEpubBook((book && book.title) || fileName.replace(/\.epub$/i, ''), input, options);
+            if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
+              if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
+                parsed.chapters.forEach(function mapId(c, i) {
+                  if (known[i]) c.id = known[i];
+                });
+              }
+              return parsed.chapters;
             }
-            return parsed.chapters;
+          } catch (err) {
+            return [];
           }
+          return [];
         }
         const text = await (await file.getFile()).text();
         const chapters = parseBookBodyText(text, known);

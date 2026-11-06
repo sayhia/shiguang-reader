@@ -1676,6 +1676,57 @@
             if (trimmed.startsWith('<hr')) {
               return h('div', { key: index, 'data-p': index, className: 'sr-divider-wrap' }, h('hr', { className: 'sr-divider' }));
             }
+            if (trimmed.startsWith('<pre') && trimmed.endsWith('</pre>')) {
+              const codeMatch = trimmed.match(/^<pre\b[^>]*><code\b(?:\s+class=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/code><\/pre>$/i);
+              const langMatch = (codeMatch && codeMatch[1] && codeMatch[1].match(/(?:language-|lang-)?([a-z0-9_-]+)/i)) || trimmed.match(/class=["'](?:language-|lang-|brush:\s*)?([a-z0-9_-]+)/i);
+              const lang = (langMatch && langMatch[1]) ? langMatch[1].toUpperCase() : '';
+              const preInner = renderedHtml.replace(/^<pre\b[^>]*>/i, '').replace(/<\/pre>$/i, '');
+              const plainCode = stripHtmlTags(preInner);
+              return h('div', {
+                key: index,
+                'data-p': index,
+                className: 'sr-code-container',
+                role: 'region',
+                'aria-label': (lang ? lang + ' ' : '') + t('codeBlock'),
+              },
+                h('div', { className: 'sr-code-header' },
+                  h('span', { className: 'sr-code-lang' }, lang || 'CODE'),
+                  h('button', {
+                    type: 'button',
+                    className: 'sr-code-copy-btn',
+                    'aria-label': t('copyShort'),
+                    onClick: function onCopy(e) {
+                      e.stopPropagation();
+                      copyTextToClipboard(plainCode).then(function() {
+                        props.showToast(t('copied'));
+                      });
+                    },
+                  }, t('copyShort')),
+                ),
+                h('pre', {
+                  className: 'sr-code-pre',
+                  tabIndex: 0,
+                  dangerouslySetInnerHTML: { __html: preInner }
+                })
+              );
+            }
+            if ((trimmed.startsWith('<ul') && trimmed.endsWith('</ul>')) || (trimmed.startsWith('<ol') && trimmed.endsWith('</ol>'))) {
+              const Tag = trimmed.startsWith('<ol') ? 'ol' : 'ul';
+              return h(Tag, {
+                key: index,
+                'data-p': index,
+                style: { margin: 'calc(var(--sr-para-gap,.9em) * .8) 0', paddingLeft: '1.8em', textIndent: 0 },
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<(?:ul|ol)\b[^>]*>/i, '').replace(/<\/(?:ul|ol)>$/i, '') }
+              });
+            }
+            if (trimmed.startsWith('<figure') && trimmed.endsWith('</figure>')) {
+              return h('figure', {
+                key: index,
+                'data-p': index,
+                className: 'sr-figure',
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<figure\b[^>]*>/i, '').replace(/<\/figure>$/i, '') }
+              });
+            }
             const pIdMatch = trimmed.match(/^<p\b[^>]*\bid=["']([^"']+)["']/i);
             const pClassMatch = trimmed.match(/^<p\b[^>]*\bclass=["']([^"']+)["']/i);
             const pInnerHtml = /^<p\b[^>]*>/i.test(renderedHtml)
@@ -1690,8 +1741,8 @@
             });
           }
 
-          // 2. Divider line (***, ---, ___, ❦, etc.)
-          const isDivider = trimmed === '***' || trimmed === '---' || trimmed === '___' || trimmed === '———' || trimmed === '···' || trimmed === '❦' || trimmed === '~~~';
+          // 2. Divider line (***, ---, ___, ~~~, ❦, etc.)
+          const isDivider = /^([*\-_~=—·❦]\s*){3,}$/.test(trimmed) || trimmed === '❦' || trimmed === '···' || trimmed === '———';
           if (isDivider) {
             return h('div', {
               key: index,
@@ -1701,13 +1752,23 @@
           }
 
           // 2. Fenced code block (```lang ... ``` or ~~~lang ... ~~~)
-          if ((trimmed.startsWith('```') || trimmed.startsWith('~~~')) && (text.includes('\n') || trimmed.length > 3)) {
+          const isFencedBlock = (function checkFenced() {
+            if (!trimmed.startsWith('```') && !trimmed.startsWith('~~~')) return false;
+            const fence = trimmed.startsWith('```') ? '```' : '~~~';
+            if (text.includes('\n')) return true;
+            const afterOpen = trimmed.slice(fence.length).trim();
+            return afterOpen.includes(fence);
+          })();
+
+          if (isFencedBlock) {
             const lines = text.split('\n');
             const firstLine = lines[0].trim();
             const fence = firstLine.startsWith('```') ? '```' : '~~~';
-            const lang = firstLine.slice(fence.length).trim();
+            const lang = firstLine.slice(fence.length).trim().replace(/[^a-zA-Z0-9_#-]/g, '');
             const lastLine = lines[lines.length - 1].trim();
-            const codeLines = lines.slice(1, (lines.length > 1 && lastLine.startsWith(fence)) ? lines.length - 1 : lines.length);
+            const codeLines = lines.length > 1
+              ? lines.slice(1, (lines.length > 1 && lastLine.startsWith(fence)) ? lines.length - 1 : lines.length)
+              : [trimmed.slice(fence.length, trimmed.lastIndexOf(fence)).trim()];
             const codeContent = codeLines.join('\n');
 
             return h('div', {

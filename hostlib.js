@@ -284,8 +284,14 @@ function decodeHtmlEntities(str) {
 
 function stripEpubTags(html) {
   return decodeHtmlEntities(String(html || '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head\s*>/gi, '')
+    .replace(/<(meta|link|base)\b[^>]*\/?>/gi, '')
+    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg\s*>/gi, '')
+    .replace(/<svg\b[^>]*\/?>/gi, '')
+    .replace(/@(page|font-face|media|charset|import|keyframes)\b[^{]*\{[^}]*\}/gi, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .trim());
@@ -398,12 +404,15 @@ export function readEpubSync(filePath) {
     let pm;
     while ((pm = pRegex.exec(xhtml))) {
       const clean = stripEpubTags(pm[1]);
-      if (clean && clean !== title) paras.push(clean);
+      if (clean && clean !== title && !/^[.#a-zA-Z0-9_\-,\s:>+~*]+\s*\{[^}]*\}\s*$/s.test(clean)) paras.push(clean);
     }
     if (!paras.length) {
       const body = (xhtml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i) || [])[1] || xhtml;
       const clean = stripEpubTags(body);
-      if (clean) clean.split(/\n{2,}/).forEach(function push(l) { if (l.trim()) paras.push(l.trim()); });
+      if (clean) clean.split(/\n{2,}/).forEach(function push(l) {
+        const val = l.trim();
+        if (val && !/^[.#a-zA-Z0-9_\-,\s:>+~*]+\s*\{[^}]*\}\s*$/s.test(val)) paras.push(val);
+      });
     }
     if (paras.length) {
       chapters.push({

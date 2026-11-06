@@ -48,6 +48,23 @@
       });
     }
 
+    function decodeEpubContentEntities(value) {
+      return String(value || '').replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, function replace(match, body) {
+        if (body.charAt(0) === '#') {
+          const hex = body.charAt(1).toLowerCase() === 'x';
+          const code = parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+          if (code === 38 || code === 60 || code === 62) return match;
+          if (Number.isFinite(code) && code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)) {
+            try { return String.fromCodePoint(code); } catch (error) { return match; }
+          }
+          return match;
+        }
+        const key = body.toLowerCase();
+        if (key === 'lt' || key === 'gt' || key === 'amp') return match;
+        return Object.prototype.hasOwnProperty.call(EPUB_ENTITY_MAP, key) ? EPUB_ENTITY_MAP[key] : match;
+      });
+    }
+
     function stripEpubMarkup(value) {
       return collapseWhitespace(decodeEpubEntities(String(value || '').replace(/<[^>]*>/g, ' ')));
     }
@@ -279,16 +296,28 @@
 
     function extractEpubChapter(rawHtml, fallbackTitle) {
       const source = String(rawHtml || '');
-      const titleMatch = source.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
-      const headingMatch = source.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i);
+      const titleMatch = source.match(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/i);
+      const headingMatch = source.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3\s*]>/i);
       let title = stripEpubMarkup(headingMatch ? headingMatch[1] : titleMatch ? titleMatch[1] : '');
       if (!title) title = fallbackTitle;
 
       let html = source
         .replace(/<\?xml[\s\S]*?\?>/gi, '')
         .replace(/<!DOCTYPE[\s\S]*?>/gi, '')
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<(script|style|head|noscript|meta|link|svg)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '');
+
+      // Lift out SVG image links before stripping SVG container
+      html = html.replace(/<image\b([^>]*?)(?:xlink:href|href)\s*=\s*(["'][^"']*["']|[^\s>]+)([^>]*?)\/?>/gi, function toImg(m, pre, href, post) {
+        return '<img src=' + href + ' ' + pre + ' ' + post + '/>';
+      });
+
+      // Thoroughly strip head, style, script, noscript, template, meta, link, svg
+      html = html
+        .replace(/<head\b[\s\S]*?<\/head\s*>/gi, '')
+        .replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<(meta|link|base)\b[^>]*\/?>/gi, '')
+        .replace(/<svg\b[\s\S]*?<\/svg\s*>/gi, '')
+        .replace(/<svg\b[^>]*\/?>/gi, '')
         .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
 
       // Pictures are lifted out before the tags go: each one becomes a paragraph of
@@ -298,18 +327,37 @@
       const pictures = [];
       html = html.replace(/<img\b([^>]*?)\/?>/gi, function capture(match, rawAttrs) {
         const attrs = parseXmlAttributes(rawAttrs);
-        if (!attrs.src) return ' ';
-        pictures.push({ src: attrs.src, alt: attrs.alt || attrs.title || '' });
+        const src = attrs.src || attrs['xlink:href'];
+        if (!src) return ' ';
+        pictures.push({ src: src, alt: attrs.alt || attrs.title || '' });
         return '\n\n\u0000img:' + (pictures.length - 1) + '\u0000\n\n';
       });
 
-      const bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
-      let content = bodyMatch ? bodyMatch[1] : html;
+      const bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i);
+      let content = bodyMatch ? bodyMatch[1] : '';
+      if (!content) {
+        const unclosedBodyMatch = html.match(/<body\b[^>]*>([\s\S]*)$/i);
+        content = unclosedBodyMatch ? unclosedBodyMatch[1] : html;
+      }
+
+      // Re-strip any stray styles, scripts, or meta that were nested inside <body>
+      content = content
+        .replace(/<(script|style|noscript|template)\b[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<(meta|link)\b[^>]*\/?>/gi, '')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/@(page|font-face|media|charset|import|keyframes)\b[^{]*\{[^}]*\}/gi, ' ');
+
+      // Protect <pre> blocks from whitespace mangling and accidental paragraph splitting
+      const preBlocks = [];
+      content = content.replace(/<pre\b([^>]*)>([\s\S]*?)<\/pre\s*>/gi, function protectPre(m, attrs, body) {
+        preBlocks.push({ attrs: attrs, body: body });
+        return '\n\n\u0000pre:' + (preBlocks.length - 1) + '\u0000\n\n';
+      });
 
       // Preserve block boundaries for containers
       content = content
-        .replace(/<\/(table|blockquote|pre|ul|ol|figure|aside|h[1-6])>/gi, '$&\n\n')
-        .replace(/<(table|blockquote|pre|ul|ol|figure|aside|h[1-6])\b[^>]*>/gi, '\n\n$&')
+        .replace(/<\/(table|blockquote|ul|ol|figure|aside|h[1-6])>/gi, '$&\n\n')
+        .replace(/<(table|blockquote|ul|ol|figure|aside|h[1-6])\b[^>]*>/gi, '\n\n$&')
         .replace(/<\/(?:p|div|section|article)>/gi, '\n\n')
         .replace(/<(?:p|div|section|article)\b([^>]*)>/gi, function keepContainerId(match, attrs) {
           const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
@@ -357,6 +405,32 @@
       const lines = content.split('\n').map(function clean(line) { return line.replace(/[ \t]+/g, ' ').trim(); });
       const cleaned = lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
       let paragraphs = cleaned.split(/\n{2,}/).map(function trim(value) { return value.replace(/[ \t]+/g, ' ').trim(); }).filter(Boolean);
+
+      // Restore protected <pre> blocks
+      paragraphs = paragraphs.map(function restorePre(p) {
+        const prePlaceholder = /^\u0000pre:(\d+)\u0000$/.exec(p);
+        if (prePlaceholder) {
+          const item = preBlocks[Number(prePlaceholder[1])];
+          if (item) {
+            const classMatch = item.attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
+            const idMatch = item.attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
+            const safeClass = classMatch ? ' ' + classMatch[0] : '';
+            const safeId = idMatch ? ' ' + idMatch[0] : '';
+            return '<pre' + safeClass + safeId + '>' + item.body.trim() + '</pre>';
+          }
+        }
+        return p;
+      });
+
+      // Filter out any leaked CSS rule blocks (e.g. `p { margin: 0; }` or `.calibre { ... }`)
+      paragraphs = paragraphs.filter(function isNotCss(p) {
+        const trimmedP = p.trim();
+        if (/^[.#a-zA-Z0-9_\-,\s:>+~*]+\s*\{[^}]*\}\s*$/s.test(trimmedP)) {
+          return false;
+        }
+        return true;
+      });
+
       if (paragraphs.length && collapseWhitespace(stripHtmlTags(paragraphs[0])) === collapseWhitespace(title)) {
         paragraphs = paragraphs.slice(1);
       }

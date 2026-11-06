@@ -2029,6 +2029,33 @@ assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.
 assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-task-list')), 'task list rendered');
 assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-subheading')), 'subheading rendered');
 assert.ok(allMdNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-divider-wrap')), 'divider rendered');
+
+// Reader renders EPUB rich HTML (<pre><code>, <ul>, <ol>, <figure>) natively without illegal <p> wrapping, and long dividers (~, -) as hr
+const epubRichBook = {
+  id: 'local-epub-rich',
+  title: 'EPUB Rich Test',
+  format: 'epub',
+  subtitle: 'EPUB',
+  chapters: [{
+    id: 'er-1',
+    title: '第一章 丰富排版',
+    paragraphs: [
+      '<p>正文段落开头。</p>',
+      '<pre><code class=\"language-python\">def hello():\n    print(\"Hello world\")</code></pre>',
+      '<ul>\n<li>列表项 1</li>\n<li>列表项 2</li>\n</ul>',
+      '~~~~~~~~~~~~~~~~~~~~',
+      '--------------------',
+      '<p>结尾段落。</p>',
+    ]
+  }]
+};
+const epubRichReader = T.Reader(Object.assign({}, smokeReaderProps, { book: epubRichBook, initialChapterIndex: 0 }));
+const allEpubRichNodes = collectNodes(epubRichReader, []);
+assert.ok(allEpubRichNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-code-container')), 'epub pre code block rendered as code container');
+assert.ok(allEpubRichNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-code-lang') && n.props.children === 'PYTHON'), 'epub code lang PYTHON detected');
+assert.ok(allEpubRichNodes.some(n => n && n.type === 'ul'), 'epub ul list rendered natively as ul');
+const dividerWraps = allEpubRichNodes.filter(n => typeof n.props.className === 'string' && n.props.className.includes('sr-divider-wrap'));
+assert.equal(dividerWraps.length, 2, 'both repeated tildes (~~~~) and dashes (----) rendered as dividers, not code blocks');
 assert.equal(T.imageParagraph('![潮水](img-1-1.png)').name, 'img-1-1.png');
 assert.equal(T.imageParagraph('潮水'), null);
 assert.equal(T.imageParagraph(''), null);
