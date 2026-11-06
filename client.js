@@ -255,6 +255,9 @@ window.__ModuleLoader__.load({
       noSearchTitle: '没有找到这本书',
       noSearchText: '换一个关键词试试，或清空搜索。',
       clearSearch: '清空搜索',
+      quickKeywords: '快捷检索',
+      offlineReady: '已离线存储',
+      offlineReadyHint: '正文已安全保存在本地，无需网络即可随时阅读。',
       importCardTitle: '导入本地书',
       importCardText: 'TXT · MD · EPUB',
       importHint: '文件只保存在这台设备的浏览器里',
@@ -1015,6 +1018,9 @@ window.__ModuleLoader__.load({
       noSearchTitle: 'No book found',
       noSearchText: 'Try another word, or clear the search.',
       clearSearch: 'Clear search',
+      quickKeywords: 'Quick search',
+      offlineReady: 'Offline ready',
+      offlineReadyHint: 'Book body is saved locally and can be read completely offline.',
       importCardTitle: 'Import a book',
       importCardText: 'TXT · MD · EPUB',
       importHint: 'Files stay in this browser on this device',
@@ -3807,6 +3813,12 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-search-empty>svg{opacity:.44;margin-bottom:2px;}
 .sr-search-empty strong{font-family:${SERIF_FONT};font-size:14px;font-weight:500;color:var(--sr-ink);}
 .sr-search-empty p{margin:0;max-width:270px;}
+.sr-search-suggest-box{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:14px;width:100%;}
+.sr-search-suggest-title{font-size:9.5px;font-weight:600;letter-spacing:.04em;color:var(--sr-muted);text-transform:uppercase;}
+.sr-search-suggest-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-width:320px;}
+.sr-search-suggest-chip{display:inline-flex;align-items:center;padding:3px 9px;border:1px solid color-mix(in srgb,var(--sr-line) 80%,transparent);border-radius:999px;background:color-mix(in srgb,var(--sr-panel) 90%,transparent);color:var(--sr-muted);font-family:${UI_FONT};font-size:10px;cursor:pointer;transition:all .12s ease;}
+.sr-search-suggest-chip:hover{color:var(--sr-ink);border-color:color-mix(in srgb,var(--sr-accent) 40%,var(--sr-line));background:var(--sr-wash);}
+.sr-detail-offline-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--sr-accent,var(--dsw-alias-brand-primary)) 12%,transparent);color:var(--sr-accent,var(--dsw-alias-brand-primary));font-size:9px;font-weight:600;letter-spacing:.02em;}
 .sr-search-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 3px 8px;font-size:8.5px;letter-spacing:.02em;color:var(--sr-muted);}
 .sr-search-results{display:flex;flex-direction:column;gap:3px;}
 .sr-search-result{display:block;width:100%;padding:10px 11px;border:1px solid transparent;border-radius:9px;background:transparent;color:inherit;text-align:left;cursor:pointer;transition:background .13s ease,border-color .13s ease;}
@@ -11931,7 +11943,13 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
               }),
             ) : null,
             h('div', { className: 'sr-detail-meta' },
-              h('span', { className: 'sr-detail-status-chip', 'data-status': statusKey }, statusKey === 'finished' ? t('finished') : t(statusKey)),
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+                h('span', { className: 'sr-detail-status-chip', 'data-status': statusKey }, statusKey === 'finished' ? t('finished') : t(statusKey)),
+                h('span', { className: 'sr-detail-offline-chip', title: t('offlineReadyHint') },
+                  h(Icon, { name: 'check', size: 9 }),
+                  h('span', null, t('offlineReady')),
+                ),
+              ),
               h('strong', { id: 'sr-detail-title', title: book.title }, book.title),
               h('span', null, book.author),
               h('span', null, fill(t('bookMeta'), { chapters: totalChapters, minutes: estimateMinutes(book) })),
@@ -14147,6 +14165,18 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
         return searchBookChapters(chapters, searchText, 80, { chapterIndex: chapterIndex });
       }, [chapters, searchText, chapterIndex]);
       const searchResult = searchScope === 'chapter' ? searchResultChapter : searchResultAll;
+      const quickKeywords = useMemo(function getKeywords() {
+        const set = new Set();
+        bookHighlights.forEach(function h(item) {
+          const t = item.text.trim();
+          if (t.length >= 2 && t.length <= 8) set.add(t);
+        });
+        chapters.forEach(function c(item) {
+          const cleaned = item.title.replace(/^第?[0-9零一二三四五六七八九十百千]+[章节回卷集篇部话]?\s*/, '').trim();
+          if (cleaned.length >= 2 && cleaned.length <= 6) set.add(cleaned);
+        });
+        return Array.from(set).slice(0, 8);
+      }, [bookHighlights, chapters]);
 
       pageRef.current = page;
       countRef.current = pageCount;
@@ -15698,6 +15728,22 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
                 ? h('div', { className: 'sr-search-empty' },
                   h(Icon, { name: 'search', size: 27 }),
                   h('p', null, t('searchHint')),
+                  quickKeywords.length ? h('div', { className: 'sr-search-suggest-box' },
+                    h('span', { className: 'sr-search-suggest-title' }, t('quickKeywords')),
+                    h('div', { className: 'sr-search-suggest-chips' },
+                      quickKeywords.map(function word(kw) {
+                        return h('button', {
+                          key: kw,
+                          type: 'button',
+                          className: 'sr-search-suggest-chip',
+                          onClick: function pickKeyword() {
+                            setSearchQuery(kw);
+                            setSearchText(kw);
+                          },
+                        }, kw);
+                      }),
+                    ),
+                  ) : null,
                 )
                 : results.length === 0
                   ? h('div', { className: 'sr-search-empty' },

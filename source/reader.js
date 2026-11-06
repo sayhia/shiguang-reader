@@ -164,6 +164,18 @@
         return searchBookChapters(chapters, searchText, 80, { chapterIndex: chapterIndex });
       }, [chapters, searchText, chapterIndex]);
       const searchResult = searchScope === 'chapter' ? searchResultChapter : searchResultAll;
+      const quickKeywords = useMemo(function getKeywords() {
+        const set = new Set();
+        bookHighlights.forEach(function h(item) {
+          const t = item.text.trim();
+          if (t.length >= 2 && t.length <= 8) set.add(t);
+        });
+        chapters.forEach(function c(item) {
+          const cleaned = item.title.replace(/^第?[0-9零一二三四五六七八九十百千]+[章节回卷集篇部话]?\s*/, '').trim();
+          if (cleaned.length >= 2 && cleaned.length <= 6) set.add(cleaned);
+        });
+        return Array.from(set).slice(0, 8);
+      }, [bookHighlights, chapters]);
 
       pageRef.current = page;
       countRef.current = pageCount;
@@ -1715,6 +1727,22 @@
                 ? h('div', { className: 'sr-search-empty' },
                   h(Icon, { name: 'search', size: 27 }),
                   h('p', null, t('searchHint')),
+                  quickKeywords.length ? h('div', { className: 'sr-search-suggest-box' },
+                    h('span', { className: 'sr-search-suggest-title' }, t('quickKeywords')),
+                    h('div', { className: 'sr-search-suggest-chips' },
+                      quickKeywords.map(function word(kw) {
+                        return h('button', {
+                          key: kw,
+                          type: 'button',
+                          className: 'sr-search-suggest-chip',
+                          onClick: function pickKeyword() {
+                            setSearchQuery(kw);
+                            setSearchText(kw);
+                          },
+                        }, kw);
+                      }),
+                    ),
+                  ) : null,
                 )
                 : results.length === 0
                   ? h('div', { className: 'sr-search-empty' },
