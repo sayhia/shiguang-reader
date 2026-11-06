@@ -1,6 +1,6 @@
 {
   "name": "shiguang-reader",
-  "version": "1.128.0",
+  "version": "1.129.0",
   "type": "module",
   "description": "拾光阅读：DeepSeek Harness 本地书架与沉浸式阅读插件。",
   "exports": {

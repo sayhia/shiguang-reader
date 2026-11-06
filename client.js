@@ -3459,6 +3459,11 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   box-shadow:0 6px 18px -4px rgba(0,0,0,.22);pointer-events:none;white-space:nowrap;
   animation:sr-fade .12s ease;z-index:20;
 }
+.sr-reader-range-tooltip::after{
+  content:"";position:absolute;bottom:-4px;left:50%;transform:translateX(-50%) rotate(45deg);
+  width:6px;height:6px;background:var(--sr-panel);
+  border-right:1px solid var(--sr-line);border-bottom:1px solid var(--sr-line);
+}
 .sr-reader-range{
   appearance:none;-webkit-appearance:none;width:100%;height:18px;background:transparent;cursor:pointer;margin:0;
 }
@@ -3523,17 +3528,23 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-page-meta{
   position:absolute;z-index:9;left:50%;bottom:14px;transform:translateX(-50%);
   display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  padding:3px 12px;border-radius:999px;pointer-events:auto;cursor:default;
+  padding:3px 12px;border-radius:999px;pointer-events:auto;cursor:pointer;
   font-family:${UI_FONT};font-size:9.5px;font-weight:500;letter-spacing:.08em;
   color:var(--sr-muted);font-variant-numeric:tabular-nums;
   background:color-mix(in srgb,var(--sr-panel) 75%,transparent);
   border:1px solid color-mix(in srgb,var(--sr-line) 60%,transparent);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 4px 12px -4px rgba(0,0,0,.1);
-  opacity:.82;transition:opacity .25s ease;
+  opacity:.82;transition:all .2s ease;
   animation:sr-fade .2s ease;
 }
-.sr-page-meta:hover{opacity:1;}
+.sr-page-meta:hover{
+  opacity:1;
+  background:color-mix(in srgb,var(--sr-panel) 92%,transparent);
+  border-color:color-mix(in srgb,var(--sr-accent) 35%,var(--sr-line));
+  transform:translateX(-50%) translateY(-1px);
+}
+.sr-page-meta:focus-visible{outline:2px solid var(--sr-accent);outline-offset:2px;}
 
 .sr-reader[data-tts="true"] .sr-reader-bottom{opacity:0 !important;pointer-events:none !important;}
 .sr-reader[data-tts="true"] .sr-page-meta{display:none;}
@@ -3683,6 +3694,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-search-results{display:flex;flex-direction:column;gap:3px;}
 .sr-search-result{display:block;width:100%;padding:10px 11px;border:1px solid transparent;border-radius:9px;background:transparent;color:inherit;text-align:left;cursor:pointer;transition:background .13s ease,border-color .13s ease;}
 .sr-search-result:hover,.sr-search-result:focus-visible{background:var(--sr-wash);border-color:color-mix(in srgb,var(--sr-accent) 20%,transparent);}
+.sr-search-result[data-active="true"]{background:var(--sr-wash);border-color:color-mix(in srgb,var(--sr-accent) 45%,transparent);box-shadow:inset 2.5px 0 0 var(--sr-accent);}
 .sr-search-result:focus-visible{outline:2px solid var(--sr-accent);outline-offset:1px;}
 .sr-search-result-head{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-bottom:4px;}
 .sr-search-result-chapter{min-width:0;font-family:${SERIF_FONT};font-size:10.5px;line-height:1.4;font-weight:600;color:var(--sr-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -16056,7 +16068,15 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
             onClick: function next(e) { e.stopPropagation(); nextPage(); },
           }, h(Icon, { name: 'chevron-right', size: 18 })),
         ),
-        !chrome ? h('div', { className: 'sr-page-meta' }, clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel) : null,
+        !chrome ? h('div', {
+          className: 'sr-page-meta',
+          role: 'button',
+          tabIndex: 0,
+          title: t('shortcutChrome'),
+          'aria-label': t('shortcutChrome'),
+          onClick: function showChrome(e) { e.stopPropagation(); setChrome(true); },
+          onKeyDown: function handleKey(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setChrome(true); } },
+        }, clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel) : null,
         h('div', { className: 'sr-reader-bottom' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-bottom-inner' },
             h('button', { type: 'button', className: 'sr-reader-tool', onClick: function toc() { setDrawer('toc'); }, title: t('readerToc') },
