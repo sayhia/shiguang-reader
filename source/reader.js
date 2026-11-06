@@ -80,6 +80,8 @@
       const [cardHighlight, setCardHighlight] = useState(null);
       const [tocOnlyNotes, setTocOnlyNotes] = useState(false);
       const [tocQuery, setTocQuery] = useState('');
+      const [notesQuery, setNotesQuery] = useState('');
+      const [notesColorFilter, setNotesColorFilter] = useState('all');
       const [fontQuickOpen, setFontQuickOpen] = useState(false);
       const [hoverScrub, setHoverScrub] = useState(null);
       const [fontHud, setFontHud] = useState(0);
@@ -1275,6 +1277,24 @@
       const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
 
       function drawerNotes() {
+        const q = notesQuery.trim().toLowerCase();
+        const filteredHighlights = bookHighlights
+          .slice()
+          .filter(function flt(n) {
+            if (notesColorFilter === 'thought') return Boolean(n.note && n.note.trim());
+            if (notesColorFilter !== 'all' && n.color !== notesColorFilter) return false;
+            if (!q) return true;
+            return (n.text && n.text.toLowerCase().includes(q)) || (n.note && n.note.toLowerCase().includes(q));
+          })
+          .sort(function order(a, b) { return a.chapterIndex - b.chapterIndex || a.start - b.start; });
+
+        const filteredBookmarks = bookmarksForBook
+          .slice()
+          .filter(function flt(b) {
+            if (!q) return true;
+            return (b.chapterTitle && b.chapterTitle.toLowerCase().includes(q)) || (b.note && b.note.toLowerCase().includes(q)) || (b.excerpt && b.excerpt.toLowerCase().includes(q));
+          });
+
         return h(React.Fragment, null,
           h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
           h('aside', { className: 'sr-drawer sr-drawer--right', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('bookNotes') },
@@ -1290,19 +1310,61 @@
             ),
             h('div', { className: 'sr-drawer-tabs' },
               h('button', { type: 'button', className: 'sr-drawer-tab', 'aria-pressed': notesTab === 'highlights', onClick: function tab() { setNotesTab('highlights'); } },
-                t('highlightCount', { n: bookHighlights.length }),
+                t('highlightCount', { n: filteredHighlights.length }),
               ),
               h('button', { type: 'button', className: 'sr-drawer-tab', 'aria-pressed': notesTab === 'bookmarks', onClick: function tab() { setNotesTab('bookmarks'); } },
-                t('bookmarkCount', { n: bookmarksForBook.length }),
+                t('bookmarkCount', { n: filteredBookmarks.length }),
               ),
             ),
+            (bookHighlights.length > 0 || bookmarksForBook.length > 0) ? h('div', { className: 'sr-notes-filter-box' },
+              h('div', { className: 'sr-notes-search-field' },
+                h(Icon, { name: 'search', size: 12 }),
+                h('input', {
+                  type: 'text',
+                  value: notesQuery,
+                  placeholder: t('searchNotesPlaceholder'),
+                  onChange: function onQ(e) { setNotesQuery(e.target.value); },
+                }),
+                notesQuery ? h('button', {
+                  type: 'button',
+                  className: 'sr-toc-search-clear',
+                  onClick: function clear() { setNotesQuery(''); },
+                  title: t('clearSearch'),
+                  'aria-label': t('clearSearch'),
+                }, h(Icon, { name: 'close', size: 10 })) : null,
+              ),
+              notesTab === 'highlights' && bookHighlights.length > 0 ? h('div', { className: 'sr-notes-filter-chips', role: 'group', 'aria-label': t('filterAll') },
+                h('button', {
+                  type: 'button',
+                  className: 'sr-notes-chip',
+                  'data-active': notesColorFilter === 'all' ? 'true' : 'false',
+                  onClick: function setAll() { setNotesColorFilter('all'); },
+                }, t('filterAll')),
+                h('button', {
+                  type: 'button',
+                  className: 'sr-notes-chip',
+                  'data-active': notesColorFilter === 'thought' ? 'true' : 'false',
+                  onClick: function setThought() { setNotesColorFilter(notesColorFilter === 'thought' ? 'all' : 'thought'); },
+                }, '💭 ' + t('thought')),
+                HIGHLIGHT_COLORS.map(function dot(c) {
+                  return h('button', {
+                    key: c.id,
+                    type: 'button',
+                    className: 'sr-notes-chip sr-notes-chip--color',
+                    'data-active': notesColorFilter === c.id ? 'true' : 'false',
+                    style: { '--sr-chip-color': c.value },
+                    onClick: function pickColor() { setNotesColorFilter(notesColorFilter === c.id ? 'all' : c.id); },
+                    title: c.id,
+                    'aria-label': c.id,
+                  }, h('span', { className: 'sr-notes-color-pip' }));
+                }),
+              ) : null,
+            ) : null,
             notesTab === 'highlights'
               ? h('div', { className: 'sr-drawer-body' },
-                bookHighlights.length === 0
+                filteredHighlights.length === 0
                   ? h('div', { className: 'sr-drawer-empty' }, h(Icon, { name: 'pen', size: 24 }), h('div', null, t('noHighlights')))
-                  : bookHighlights
-                    .slice()
-                    .sort(function order(a, b) { return a.chapterIndex - b.chapterIndex || a.start - b.start; })
+                  : filteredHighlights
                     .map(function item(note) {
                       const color = HIGHLIGHT_COLORS.find(function find(entry) { return entry.id === note.color; }) || HIGHLIGHT_COLORS[0];
                       const noteChapter = chapters[note.chapterIndex];
@@ -1321,9 +1383,9 @@
                     }),
               )
               : h('div', { className: 'sr-drawer-body' },
-                bookmarksForBook.length === 0
+                filteredBookmarks.length === 0
                   ? h('div', { className: 'sr-drawer-empty' }, h(Icon, { name: 'bookmark', size: 24 }), h('div', null, t('noBookmarks')))
-                  : bookmarksForBook.map(function bookmark(item) {
+                  : filteredBookmarks.map(function bookmark(item) {
                     return h('div', { key: item.id, className: 'sr-bookmark-row' },
                       h('button', { type: 'button', className: 'sr-bookmark-main', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); goChapter(item.chapterIndex, 'percent', item.percent); } },
                         h('strong', null, item.chapterTitle || (chapters[item.chapterIndex] ? chapters[item.chapterIndex].title : '')),
@@ -1342,20 +1404,21 @@
                 type: 'button',
                 className: 'sr-mini-action sr-export-notes-btn',
                 onClick: function exportNotes() {
+                  const toExport = filteredHighlights.length > 0 ? filteredHighlights : bookHighlights;
                   let md = '# 《' + (book.title || '') + '》' + (t('notes') || '笔记') + '\n\n';
                   if (book.author) md += '> ' + t('author') + '：' + book.author + '\n\n';
-                  if (bookHighlights.length > 0) {
-                    md += '## ' + t('highlight') + ' (' + bookHighlights.length + ')\n\n';
-                    bookHighlights.slice().sort(function o(a, b) { return a.chapterIndex - b.chapterIndex || a.start - b.start; }).forEach(function entry(n) {
+                  if (toExport.length > 0) {
+                    md += '## ' + t('highlight') + ' (' + toExport.length + ')\n\n';
+                    toExport.forEach(function entry(n) {
                       const cTitle = chapters[n.chapterIndex] ? chapters[n.chapterIndex].title : '';
                       md += '- **[' + cTitle + ']** ' + n.text.trim() + '\n';
                       if (n.note) md += '  > 💭 ' + n.note.trim() + '\n';
                       md += '\n';
                     });
                   }
-                  if (bookmarksForBook.length > 0) {
-                    md += '## ' + t('bookmark') + ' (' + bookmarksForBook.length + ')\n\n';
-                    bookmarksForBook.forEach(function bm(b) {
+                  if (filteredBookmarks.length > 0) {
+                    md += '## ' + t('bookmark') + ' (' + filteredBookmarks.length + ')\n\n';
+                    filteredBookmarks.forEach(function bm(b) {
                       md += '- **' + (b.chapterTitle || '') + '** (p.' + (b.page + 1) + ')' + (b.note ? '：' + b.note : '') + '\n';
                     });
                   }
@@ -2098,6 +2161,12 @@
         ref: readerRef,
         tabIndex: -1,
       },
+        h('div', {
+          className: 'sr-sr-only',
+          role: 'status',
+          'aria-live': 'polite',
+          'aria-atomic': 'true',
+        }, fill(t('readingLivePage'), { chapter: chapter.title, page: page + 1, total: pageCount })),
         h('div', { className: 'sr-reader-slim-progress', style: { width: overallBookPct + '%' }, 'aria-hidden': 'true', title: overallBookPct + '%' }),
         h('header', { className: 'sr-reader-top' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-top-left' },
