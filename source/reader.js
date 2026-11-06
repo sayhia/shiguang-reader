@@ -1317,7 +1317,7 @@
                         h('small', null, fill(t('bookmarkPage'), { n: item.page }) + ' · ' + dateLabel(item.createdAt)),
                       ),
                       h('button', { type: 'button', className: 'sr-mini-action', onClick: function editNote() { setBookmarkDraft({ id: item.id, note: item.note || '', chapterTitle: item.chapterTitle, page: item.page }); } }, t('bookmarkNote')),
-                      h('button', { type: 'button', className: 'sr-mini-action', onClick: function remove() { props.removeBookmark(item.id); } }, t('delete')),
+                      h('button', { type: 'button', className: 'sr-mini-action', 'data-danger': 'true', onClick: function remove() { props.removeBookmark(item.id); } }, t('delete')),
                     );
                   }),
               ),
@@ -2185,7 +2185,7 @@
           },
             currentBookmark ? h('button', {
               type: 'button',
-              className: 'sr-page-bookmark-ribbon',
+              className: 'sr-page-bookmark-ribbon' + (currentBookmark.note ? ' sr-page-bookmark-ribbon--noted' : ''),
               title: currentBookmark.note ? t('bookmarkNoteTitle') + ': ' + currentBookmark.note : t('readerBookmarkOn'),
               'aria-label': t('readerBookmarkOn'),
               onClick: function onRibbonClick(e) {
@@ -2334,6 +2334,7 @@
         ),
         tts.status !== 'idle' ? h('div', {
           className: 'sr-tts-bar',
+          'data-status': tts.status,
           role: 'group',
           'aria-label': t('readAloud'),
         },
