@@ -162,6 +162,9 @@ const mdBook = T.parseImportedBook('guide.md', mdSample);
 assert.equal(mdBook.title, 'Markdown 深度解析');
 assert.equal(mdBook.author, '技术专家');
 assert.equal(mdBook.format, 'markdown');
+assert.equal(mdBook.subtitle, 'Markdown');
+assert.ok(mdBook.tags.includes('Markdown'));
+assert.equal(T.isMarkdownBook(mdBook), true);
 assert.equal(mdBook.chapters.length, 1);
 assert.equal(mdBook.chapters[0].title, '第一章 Markdown 进阶');
 
@@ -204,6 +207,33 @@ assert.ok(Array.isArray(inlineNodes));
 assert.ok(inlineNodes.some(n => n && n.type === 'strong' && n.props && n.props.children === '加粗'));
 assert.ok(inlineNodes.some(n => n && n.type === 'code' && n.props && n.props.children === '代码'));
 assert.ok(inlineNodes.some(n => n && n.type === 'a' && n.props && n.props.children === '链接'));
+
+// Verify footnote references and anchor link attributes in renderInline
+const footnoteNodes = T.renderInline('文本带有脚注[^note1]和内部链接[第一节](#sec1)与相对链接[下一章](ch2.xhtml)');
+const fnNode = footnoteNodes.find(n => n && n.type === 'sup');
+assert.ok(fnNode, 'footnote reference renders sup tag');
+assert.equal(fnNode.props.className, 'sr-footnote-ref');
+assert.equal(fnNode.props.children.type, 'a');
+assert.equal(fnNode.props.children.props.href, '#fn-note1');
+assert.equal(fnNode.props.children.props['epub:type'], 'noteref');
+assert.equal(fnNode.props.children.props.role, 'doc-noteref');
+
+const anchorNodes = footnoteNodes.filter(n => n && n.type === 'a');
+const internalAnchor = anchorNodes.find(n => n.props.children === '第一节');
+assert.ok(internalAnchor, 'internal link is rendered');
+assert.equal(internalAnchor.props.href, '#sec1');
+assert.equal(internalAnchor.props.target, undefined, 'internal links do not have target _blank');
+assert.equal(internalAnchor.props.onClick, undefined, 'links do not swallow clicks with stopPropagation');
+
+const relativeAnchor = anchorNodes.find(n => n.props.children === '下一章');
+assert.ok(relativeAnchor, 'relative chapter link is rendered');
+assert.equal(relativeAnchor.props.href, 'ch2.xhtml');
+assert.equal(relativeAnchor.props.target, undefined, 'relative intra-book links do not have target _blank');
+
+const externalNodes = T.renderInline('[外链](https://example.com)');
+const extAnchor = externalNodes.find(n => n && n.type === 'a');
+assert.equal(extAnchor.props.target, '_blank', 'external links open in target _blank');
+assert.equal(extAnchor.props.rel, 'noopener noreferrer');
 
 // Verify HTML stripping & ruby text handling
 const sampleRichHtml = '<p>有<strong>造境</strong>，有<em>写境</em>，此<ruby>理<rt>lǐ</rt>想<rt>xiǎng</rt></ruby>之别。&amp;&nbsp;&lt;&gt;</p>';

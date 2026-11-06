@@ -592,6 +592,8 @@
           // The picture map belongs to the whole chapter; a piece only sees the
           // markers it actually contains, so carrying it along costs nothing.
           images: chapter.images,
+          href: chapter.href,
+          path: chapter.path,
         };
       });
     }
@@ -809,9 +811,9 @@
         id: 'local-' + Date.now().toString(36) + '-' + (seed % 99991).toString(36),
         title: title,
         author: author,
-        subtitle: '本地文本',
-        description: '从本地导入的文本，保存在此浏览器中。',
-        tags: ['本地导入'],
+        subtitle: isMdFile ? 'Markdown' : '本地文本',
+        description: isMdFile ? '从 Markdown 导入的文件，保存在此浏览器中。' : '从本地导入的文本，保存在此浏览器中。',
+        tags: isMdFile ? ['Markdown', '本地导入'] : ['本地导入'],
         source: 'local',
         format: isMdFile ? 'markdown' : 'txt',
         addedAt: Date.now(),
@@ -919,7 +921,7 @@
       if (typeof text !== 'string') return [text];
       if (!/[*_~`$\[]/.test(text)) return [text];
 
-      const tokenRegex = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*([^*]+)\*|_([^_]+)_|\$([^\$]+)\$)/g;
+      const tokenRegex = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|\[\^([^\]]+)\]|\[([^\]]+)\]\(([^)]+)\)|\*([^*]+)\*|_([^_]+)_|\$([^\$]+)\$)/g;
       const nodes = [];
       let lastIndex = 0;
       let match;
@@ -939,22 +941,33 @@
         } else if (match[5] !== undefined) {
           nodes.push(h('code', { key: k }, match[5]));
         } else if (match[6] !== undefined) {
-          const linkHref = match[7];
-          const isSafe = /^https?:\/\//i.test(linkHref) || /^mailto:/i.test(linkHref) || linkHref.startsWith('#');
+          const fnId = match[6];
+          nodes.push(h('sup', { key: k, className: 'sr-footnote-ref' },
+            h('a', {
+              href: '#fn-' + fnId,
+              'epub:type': 'noteref',
+              role: 'doc-noteref',
+              className: 'sr-link sr-noteref',
+            }, '[' + fnId + ']')
+          ));
+        } else if (match[7] !== undefined) {
+          const linkText = match[7];
+          const linkHref = match[8];
+          const isExternal = /^https?:\/\//i.test(linkHref) || /^mailto:/i.test(linkHref);
+          const isDangerous = /^(javascript|vbscript|data):/i.test(linkHref.trim());
           nodes.push(h('a', {
             key: k,
             className: 'sr-link',
-            href: isSafe ? linkHref : undefined,
-            target: '_blank',
-            rel: 'noopener noreferrer',
-            onClick: function(e) { e.stopPropagation(); },
-          }, match[6]));
-        } else if (match[8] !== undefined) {
-          nodes.push(h('em', { key: k }, match[8]));
+            href: isDangerous ? undefined : linkHref,
+            target: isExternal ? '_blank' : undefined,
+            rel: isExternal ? 'noopener noreferrer' : undefined,
+          }, linkText));
         } else if (match[9] !== undefined) {
           nodes.push(h('em', { key: k }, match[9]));
         } else if (match[10] !== undefined) {
-          nodes.push(h('span', { key: k, className: 'sr-math-inline' }, h('code', null, match[10])));
+          nodes.push(h('em', { key: k }, match[10]));
+        } else if (match[11] !== undefined) {
+          nodes.push(h('span', { key: k, className: 'sr-math-inline' }, h('code', null, match[11])));
         }
         lastIndex = tokenRegex.lastIndex;
       }

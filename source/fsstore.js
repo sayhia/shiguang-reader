@@ -474,6 +474,7 @@
         // anything left under a previous title, so a rename never doubles the folder.
         await fsRemoveEntry(directory, fsBookFileName(book.id));
         const bodySuffix = fsBodySuffix(book.id);
+        const mdSuffix = fsMdSuffix(book.id);
         const sourceSuffix = fsSourceSuffix(book.id);
         const assetsSuffix = fsAssetsSuffix(book.id);
         const sourceName = fsSourceFileName(book, 'epub');
@@ -485,7 +486,7 @@
           // Without bytes this save wrote, a source file is the last copy there is:
           // leave it where it is rather than deleting it for tidiness.
           if (endsWithSource && !wroteSource) continue;
-          if (entry.name.endsWith(bodySuffix) || endsWithSource || entry.name.endsWith(assetsSuffix)) {
+          if (entry.name.endsWith(bodySuffix) || entry.name.endsWith(mdSuffix) || endsWithSource || entry.name.endsWith(assetsSuffix)) {
             stale.push({ name: entry.name, directory: entry.kind === 'directory' });
           }
         }
@@ -841,7 +842,7 @@
       const directory = await fsBooksDirectory(false);
       const names = [];
       for await (const entry of directory.values()) {
-        if (entry.kind === 'file' && /\.(txt|json|epub)$/i.test(entry.name)) names.push(entry.name);
+        if (entry.kind === 'file' && /\.(txt|md|json|epub)$/i.test(entry.name)) names.push(entry.name);
         else if (entry.kind === 'directory' && /\.assets$/i.test(entry.name)) names.push(entry.name);
       }
       return names;

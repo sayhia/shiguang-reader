@@ -219,7 +219,13 @@
           else if (mode === 'page' && typeof percent === 'number') setPage(clamp(Math.round(percent), 0, Math.max(0, pageCount - 1)));
           else if (mode === 'anchor' && percent && columnsRef.current) {
             let el = null;
-            try { el = columnsRef.current.querySelector('#' + CSS.escape(String(percent))); } catch (e) {}
+            try {
+              const cleanAId = String(percent).replace(/^#/, '');
+              const esc = CSS.escape(cleanAId);
+              el = columnsRef.current.querySelector('#' + esc) ||
+                   columnsRef.current.querySelector('[name="' + esc + '"]') ||
+                   columnsRef.current.querySelector('[data-slug="' + esc.toLowerCase() + '"]');
+            } catch (e) {}
             if (el) {
               const containerRect = columnsRef.current.getBoundingClientRect();
               const elRect = el.getBoundingClientRect();
@@ -529,11 +535,17 @@
           else if (typeof pendingRef.current === 'object' && pendingRef.current && pendingRef.current.page !== undefined) target = clamp(pendingRef.current.page, 0, nextCount - 1);
           else if (typeof pendingRef.current === 'object' && pendingRef.current && pendingRef.current.anchorId) {
             let el = null;
-            try { el = element.querySelector('#' + CSS.escape(pendingRef.current.anchorId)); } catch (e) {}
+            try {
+              const cleanAId = String(pendingRef.current.anchorId).replace(/^#/, '');
+              const esc = CSS.escape(cleanAId);
+              el = element.querySelector('#' + esc) ||
+                   element.querySelector('[name="' + esc + '"]') ||
+                   element.querySelector('[data-slug="' + esc.toLowerCase() + '"]');
+            } catch (e) {}
             if (el) {
               const containerRect = element.getBoundingClientRect();
               const elRect = el.getBoundingClientRect();
-              const actualLeft = elRect.left - containerRect.left;
+              const actualLeft = (elRect.left - containerRect.left) + pageRef.current * stepSize;
               target = clamp(Math.floor(actualLeft / stepSize), 0, nextCount - 1);
             }
           }
@@ -1031,20 +1043,25 @@
           const hashIdx = href.indexOf('#');
           const targetPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
           const targetId = hashIdx >= 0 ? href.slice(hashIdx + 1) : '';
+          const cleanTargetId = targetId ? targetId.replace(/^#/, '') : '';
 
           // 1. Is this a footnote?
           const isNoteRef = /noteref|footnote|comment/i.test(epubType) ||
             /noteref|doc-noteref/i.test(role) ||
             /noteref|footnote/i.test(className) ||
-            /(^|[-_])(fn|footnote|note|comment)([-_0-9]|$)/i.test(targetId) ||
+            /(^|[-_])(fn|footnote|note|comment)([-_0-9]|$)/i.test(cleanTargetId) ||
             Boolean(anchor.closest('sup')) ||
             /^[\[(]?[0-9*注†‡§#]+[\])]?$/.test(anchor.textContent.trim());
 
-          if (targetId && (isNoteRef || !targetPath)) {
+          if (cleanTargetId && (isNoteRef || !targetPath)) {
             let el = null;
             try {
-              el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
-                   document.getElementById(targetId);
+              const esc = CSS.escape(cleanTargetId);
+              el = (columnsRef.current && (
+                columnsRef.current.querySelector('#' + esc) ||
+                columnsRef.current.querySelector('[name="' + esc + '"]') ||
+                columnsRef.current.querySelector('[data-slug="' + esc.toLowerCase() + '"]')
+              )) || document.getElementById(cleanTargetId);
             } catch (e) { /* ignore */ }
 
             let noteText = '';
@@ -1058,13 +1075,23 @@
 
             if (!noteText) {
               // Search in current chapter or other chapters
-              const idPattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+              const idPattern = new RegExp('(?:id|name)=["\']' + cleanTargetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+              const rawFnId = cleanTargetId.replace(/^fn[-_]/i, '');
+              const mdFnPattern = new RegExp('^\\[\\^' + rawFnId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\]:\\s*([\\s\\S]*)$', 'm');
               for (let i = 0; i < chapters.length; i += 1) {
                 const c = chapters[i];
                 const pList = c.paragraphs || [];
-                const foundIdx = pList.findIndex(function(p) { return idPattern.test(p); });
+                const foundIdx = pList.findIndex(function(p) {
+                  return idPattern.test(p) || mdFnPattern.test(p);
+                });
                 if (foundIdx >= 0) {
                   let p = pList[foundIdx];
+                  const mdm = p.match(mdFnPattern);
+                  if (mdm) {
+                    noteText = mdm[1].trim();
+                    noteHtml = '<p>' + mdm[1].trim().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>';
+                    break;
+                  }
                   let clean = stripHtmlTags(p).trim();
                   if (!clean && pList[foundIdx + 1]) {
                     p = pList[foundIdx + 1];
@@ -1085,7 +1112,7 @@
               const position = popoverPosition(rect, 170);
               dismissPopovers();
               setFootnote({
-                id: targetId,
+                id: cleanTargetId,
                 title: anchor.textContent.trim() || t('footnote'),
                 html: noteHtml,
                 text: noteText,
@@ -1099,11 +1126,15 @@
 
           // 2. If it's NOT a footnote, it is an internal jump link (章节跳转 / 锚点跳转)!
           // 2a. In current chapter:
-          if (targetId && (!targetPath || targetPath === (chapter.href || '') || targetPath === (chapter.path || ''))) {
+          if (cleanTargetId && (!targetPath || targetPath === (chapter.href || '') || targetPath === (chapter.path || ''))) {
             let el = null;
             try {
-              el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
-                   document.getElementById(targetId);
+              const esc = CSS.escape(cleanTargetId);
+              el = (columnsRef.current && (
+                columnsRef.current.querySelector('#' + esc) ||
+                columnsRef.current.querySelector('[name="' + esc + '"]') ||
+                columnsRef.current.querySelector('[data-slug="' + esc.toLowerCase() + '"]')
+              )) || document.getElementById(cleanTargetId);
             } catch (e) { /* ignore */ }
             if (el && columnsRef.current) {
               dismissPopovers();
@@ -1132,18 +1163,28 @@
                      (targetFileName && cFile === targetFileName);
             });
           }
-          if (targetChapIdx < 0 && targetId) {
-            const idPattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
-            targetChapIdx = chapters.findIndex(function(c) {
-              return (c.paragraphs || []).some(function(p) { return idPattern.test(p); });
+          if (cleanTargetId) {
+            const idPattern = new RegExp('(?:id|name)=["\']' + cleanTargetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+            const targetIdClean = cleanTargetId.toLowerCase().replace(/[-_]+/g, ' ').trim();
+            const candidateIdx = chapters.findIndex(function(c) {
+              if (c.id === cleanTargetId) return true;
+              if (c.title && c.title.toLowerCase().trim() === targetIdClean) return true;
+              return (c.paragraphs || []).some(function(p) {
+                if (idPattern.test(p)) return true;
+                const cleanP = p.replace(/^#+\s*/, '').trim().toLowerCase();
+                return cleanP === targetIdClean || cleanP.replace(/[^\w\u4e00-\u9fa5-]+/g, '-') === cleanTargetId.toLowerCase();
+              });
             });
+            if (candidateIdx >= 0) {
+              targetChapIdx = candidateIdx;
+            }
           }
 
           if (targetChapIdx >= 0) {
             dismissPopovers();
             setJumpReturn({ chapterIndex: chapterIndex, page: page });
-            if (targetId) {
-              goChapter(targetChapIdx, 'anchor', targetId);
+            if (cleanTargetId) {
+              goChapter(targetChapIdx, 'anchor', cleanTargetId);
             } else {
               goChapter(targetChapIdx, 'page', 0);
             }
@@ -1820,17 +1861,37 @@
             }
           }
 
+          // 7b. Markdown footnote definition: [^1]: Note text
+          const fnDefMatch = trimmed.match(/^\[\^([^\]]+)\]:\s*([\s\S]*)$/);
+          if (fnDefMatch) {
+            const fnId = fnDefMatch[1];
+            const fnBody = fnDefMatch[2];
+            return h('aside', {
+              key: index,
+              'data-p': index,
+              id: 'fn-' + fnId,
+              className: 'sr-footnote-def',
+              'epub:type': 'footnote',
+              role: 'doc-footnote',
+            },
+              h('span', { className: 'sr-footnote-label', style: { fontWeight: 'bold', marginRight: '6px' } }, '[' + fnId + ']:'),
+              renderInline(fnBody, 'fnb-' + index)
+            );
+          }
+
           // 8. Subheadings (##, ###, etc.)
           const headingMatch = trimmed.match(/^(#{2,6})\s+(.+)$/);
           if (headingMatch) {
             const level = headingMatch[1].length;
             const headingClean = headingMatch[2].trim();
+            const headingSlug = headingClean.toLowerCase().replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/^-+|-+$/g, '');
             const Tag = 'h' + Math.min(6, level + 1);
             return h(Tag, {
               key: index,
               'data-p': index,
               className: 'sr-subheading',
-              id: 'h-' + index,
+              id: headingSlug || ('h-' + index),
+              'data-slug': headingSlug,
             }, segmentParagraph(headingClean, offsets.offsets[index], chapterHighlights));
           }
 

@@ -330,6 +330,8 @@
           const hrefMatch = attrs.match(/\bhref\s*=\s*("[^"]*"|'[^']*')/i);
           const classMatch = attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
           const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
+          const nameMatch = attrs.match(/\bname\s*=\s*("[^"]*"|'[^']*')/i);
+          const roleMatch = attrs.match(/\brole\s*=\s*("[^"]*"|'[^']*')/i);
           const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
           const alignMatch = attrs.match(/\balign\s*=\s*("[^"]*"|'[^']*')/i);
           const colspanMatch = attrs.match(/\bcolspan\s*=\s*("[^"]*"|'[^']*')/i);
@@ -337,6 +339,11 @@
           if (hrefMatch) safeAttrs += ' ' + hrefMatch[0];
           if (classMatch) safeAttrs += ' ' + classMatch[0];
           if (idMatch) safeAttrs += ' ' + idMatch[0];
+          if (nameMatch) {
+            safeAttrs += ' ' + nameMatch[0];
+            if (!idMatch) safeAttrs += ' id=' + nameMatch[1];
+          }
+          if (roleMatch) safeAttrs += ' ' + roleMatch[0];
           if (epubTypeMatch) safeAttrs += ' ' + epubTypeMatch[0];
           if (alignMatch) safeAttrs += ' ' + alignMatch[0];
           if (colspanMatch) safeAttrs += ' ' + colspanMatch[0];

@@ -25,6 +25,7 @@ import {
   inspectLibraryDir,
   formatBytes,
   looksLikeBackup,
+  readEpubSync,
   readLibraryDir,
   searchBooks,
 } from './hostlib.js';
@@ -667,6 +668,35 @@ const pruned = await pruneIndexes();
 assert.ok(pruned.removed >= 1);
 assert.equal(fs.existsSync(pruneIndexPath), false, 'abandoned cache is removed');
 assert.ok(fs.existsSync(indexPathFor(libraryDir)), 'live library cache is kept');
+
+// Direct EPUB sync reading: reads native chapters without writing or needing TXT
+const directEpubChapters = readEpubSync('tests/sample.epub');
+assert.equal(directEpubChapters.length, 2);
+assert.equal(directEpubChapters[0].title, 'Chapter One');
+assert.equal(directEpubChapters[0].paragraphs[0], '海风从窗边吹进来。');
+assert.equal(directEpubChapters[1].title, '第二章 归航');
+assert.equal(directEpubChapters[1].paragraphs[1], '她把书合上，听见远处的汽笛。');
+
+// EPUB stored directly on disk without .txt file in library folder
+const epubDiskDir = path.join(workdir, '纯EPUB书库');
+fs.mkdirSync(path.join(epubDiskDir, 'books'), { recursive: true });
+fs.writeFileSync(path.join(epubDiskDir, 'library.json'), JSON.stringify({
+  v: 1,
+  customBooks: [{ id: 'local-epub-pure', title: '海边的书', author: '测试作者', chaptersInFs: true, format: 'epub' }],
+}));
+fs.copyFileSync('tests/sample.epub', path.join(epubDiskDir, 'books', '海边的书--local-epub-pure.epub'));
+const epubDiskInspect = inspectLibraryDir(epubDiskDir);
+assert.equal(epubDiskInspect.books, 1, 'inspectLibraryDir identifies native epub as a book');
+assert.equal(epubDiskInspect.bytes.sources > 0, true);
+
+const epubDiskRead = readLibraryDir(epubDiskDir);
+assert.equal(epubDiskRead.state.customBooks[0].chapters.length, 2, 'reads chapters directly from disk .epub');
+assert.equal(epubDiskRead.state.customBooks[0].chapters[0].paragraphs[0], '海风从窗边吹进来。');
+
+const epubSearchResult = searchBooks(epubDiskRead.state.customBooks, '远处的汽笛');
+assert.equal(epubSearchResult.hits.length, 1);
+assert.equal(epubSearchResult.hits[0].bookId, 'local-epub-pure');
+assert.equal(epubSearchResult.hits[0].chapterTitle, '第二章 归航');
 
 fs.rmSync(workdir, { recursive: true, force: true });
 

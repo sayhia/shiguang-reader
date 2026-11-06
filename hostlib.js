@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 // Built-in books have been removed. All books are now imported by the user.
 
 function asArray(value) {
@@ -146,6 +147,14 @@ function bodySuffix(id) {
   return '--' + String(id || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.txt';
 }
 
+function mdSuffix(id) {
+  return '--' + String(id || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.md';
+}
+
+function epubSuffix(id) {
+  return '--' + String(id || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.epub';
+}
+
 function assetsSuffix(id) {
   return '--' + String(id || '').replace(/[^A-Za-z0-9._-]/g, '_') + '.assets';
 }
@@ -170,17 +179,29 @@ function assetsDirFor(booksDir, id) {
   }
 }
 
-function bodyFileFor(booksDir, id) {
+function bodyFilesFor(booksDir, id) {
   let names = [];
   try {
     names = fs.readdirSync(booksDir);
   } catch (error) {
-    return '';
+    return [];
   }
-  const suffix = bodySuffix(id);
-  return names.find(function match(name) {
-    return name.endsWith(suffix);
-  }) || '';
+  const epubSuff = epubSuffix(id);
+  const mdSuff = mdSuffix(id);
+  const txtSuff = bodySuffix(id);
+  const files = [];
+  const epub = names.find(function match(name) { return name.endsWith(epubSuff); });
+  const md = names.find(function match(name) { return name.endsWith(mdSuff); });
+  const txt = names.find(function match(name) { return name.endsWith(txtSuff); });
+  if (epub) files.push(epub);
+  if (md) files.push(md);
+  if (txt) files.push(txt);
+  return files;
+}
+
+function bodyFileFor(booksDir, id) {
+  const files = bodyFilesFor(booksDir, id);
+  return files[0] || '';
 }
 
 // A picture the reader placed in the text: `![caption](img-1-1.png)` on its own
@@ -247,16 +268,186 @@ function parseBodyText(text, ids) {
   });
 }
 
+function decodeHtmlEntities(str) {
+  return str.replace(/&([a-zA-Z0-9#]+);/g, function entity(m, code) {
+    if (code === 'amp') return '&';
+    if (code === 'lt') return '<';
+    if (code === 'gt') return '>';
+    if (code === 'quot') return '"';
+    if (code === 'apos') return "'";
+    if (code === 'nbsp') return ' ';
+    if (code.startsWith('#x') || code.startsWith('#X')) return String.fromCharCode(parseInt(code.slice(2), 16));
+    if (code.startsWith('#')) return String.fromCharCode(parseInt(code.slice(1), 10));
+    return m;
+  });
+}
+
+function stripEpubTags(html) {
+  return decodeHtmlEntities(String(html || '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim());
+}
+
+export function readEpubSync(filePath) {
+  let buf;
+  try {
+    buf = fs.readFileSync(filePath);
+  } catch (error) {
+    return [];
+  }
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return [];
+  const count = buf.readUInt16LE(eocd + 10);
+  const dirOffset = buf.readUInt32LE(eocd + 16);
+  let cursor = dirOffset;
+  const entries = new Map();
+  for (let i = 0; i < count; i++) {
+    if (cursor + 46 > buf.length || buf.readUInt32LE(cursor) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(cursor + 10);
+    const compSize = buf.readUInt32LE(cursor + 20);
+    const uncompSize = buf.readUInt32LE(cursor + 24);
+    const nameLen = buf.readUInt16LE(cursor + 28);
+    const extraLen = buf.readUInt16LE(cursor + 30);
+    const commLen = buf.readUInt16LE(cursor + 32);
+    const localOffset = buf.readUInt32LE(cursor + 42);
+    const name = buf.toString('utf8', cursor + 46, cursor + 46 + nameLen).replace(/\\/g, '/').replace(/^\/+/, '');
+    entries.set(name, { method: method, compSize: compSize, uncompSize: uncompSize, localOffset: localOffset });
+    cursor += 46 + nameLen + extraLen + commLen;
+  }
+
+  function readText(entryPath) {
+    const clean = entryPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    let entry = entries.get(clean);
+    if (!entry) {
+      for (const [k, v] of entries) {
+        if (k.toLowerCase() === clean.toLowerCase()) { entry = v; break; }
+      }
+    }
+    if (!entry) return null;
+    const lh = entry.localOffset;
+    if (lh + 30 > buf.length || buf.readUInt32LE(lh) !== 0x04034b50) return null;
+    const nLen = buf.readUInt16LE(lh + 26);
+    const eLen = buf.readUInt16LE(lh + 28);
+    const start = lh + 30 + nLen + eLen;
+    const slice = buf.subarray(start, start + entry.compSize);
+    let bytes;
+    try {
+      if (entry.method === 0) bytes = slice;
+      else if (entry.method === 8) bytes = zlib.inflateRawSync(slice);
+      else return null;
+      return bytes.toString('utf8');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  const container = readText('META-INF/container.xml');
+  if (!container) return [];
+  const rootMatch = container.match(/full-path=["']([^"']+)["']/i);
+  if (!rootMatch) return [];
+  const opfPath = rootMatch[1];
+  const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/')) : '';
+  const opf = readText(opfPath);
+  if (!opf) return [];
+
+  const manifest = new Map();
+  const itemRegex = /<item\b([^>]*?)\/?>/gi;
+  let im;
+  while ((im = itemRegex.exec(opf))) {
+    const attrs = im[1];
+    const id = (attrs.match(/\bid=["']([^"']+)["']/i) || [])[1];
+    const href = (attrs.match(/\bhref=["']([^"']+)["']/i) || [])[1];
+    if (id && href) manifest.set(id, href);
+  }
+
+  const spine = [];
+  const spineRegex = /<itemref\b([^>]*?)\/?>/gi;
+  let sm;
+  while ((sm = spineRegex.exec(opf))) {
+    const idref = (sm[1].match(/\bidref=["']([^"']+)["']/i) || [])[1];
+    if (idref && manifest.has(idref)) spine.push({ id: idref, href: manifest.get(idref) });
+  }
+
+  const chapters = [];
+  spine.forEach(function each(item, idx) {
+    let fullPath = (opfDir ? opfDir + '/' : '') + item.href;
+    const parts = fullPath.split('/');
+    const resolved = [];
+    for (const p of parts) {
+      if (!p || p === '.') continue;
+      if (p === '..') resolved.pop();
+      else resolved.push(p);
+    }
+    const chapterPath = resolved.join('/');
+    const xhtml = readText(chapterPath);
+    if (!xhtml) return;
+
+    let titleMatch = xhtml.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i) ||
+                     xhtml.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i);
+    let title = titleMatch ? stripEpubTags(titleMatch[1]) : '';
+    if (!title) title = '第 ' + (idx + 1) + ' 章';
+
+    const paras = [];
+    const pRegex = /<(?:p|div|li|blockquote|h[1-6])\b[^>]*>([\s\S]*?)<\/(?:p|div|li|blockquote|h[1-6])>/gi;
+    let pm;
+    while ((pm = pRegex.exec(xhtml))) {
+      const clean = stripEpubTags(pm[1]);
+      if (clean && clean !== title) paras.push(clean);
+    }
+    if (!paras.length) {
+      const body = (xhtml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i) || [])[1] || xhtml;
+      const clean = stripEpubTags(body);
+      if (clean) clean.split(/\n{2,}/).forEach(function push(l) { if (l.trim()) paras.push(l.trim()); });
+    }
+    if (paras.length) {
+      chapters.push({
+        id: item.id || ('chap-' + (idx + 1)),
+        title: title,
+        paragraphs: paras,
+      });
+    }
+  });
+
+  return chapters;
+}
+
 // One book's chapters, newest format first, then the JSON written by older versions.
 function readBookBody(booksDir, book) {
-  const readable = bodyFileFor(booksDir, book && book.id);
-  if (readable) {
-    const text = fs.readFileSync(path.join(booksDir, readable), 'utf8');
-    const chapters = parseBodyText(text, book.chapterIds);
-    if (chapters.length) return chapters;
+  const candidates = bodyFilesFor(booksDir, book && book.id);
+  // If book format is txt or markdown, prioritize text files
+  if (book && (book.format === 'txt' || book.format === 'markdown')) {
+    candidates.sort(function(a, b) {
+      const aText = a.endsWith('.txt') || a.endsWith('.md');
+      const bText = b.endsWith('.txt') || b.endsWith('.md');
+      return (bText ? 1 : 0) - (aText ? 1 : 0);
+    });
   }
-  const parsed = JSON.parse(fs.readFileSync(path.join(booksDir, bookFileName(book.id)), 'utf8'));
-  return asArray(parsed && parsed.chapters);
+  for (let i = 0; i < candidates.length; i++) {
+    const readable = candidates[i];
+    const full = path.join(booksDir, readable);
+    if (readable.endsWith('.epub')) {
+      const chapters = readEpubSync(full);
+      if (chapters.length) return chapters;
+    } else {
+      try {
+        const text = fs.readFileSync(full, 'utf8');
+        const chapters = parseBodyText(text, book && book.chapterIds);
+        if (chapters.length) return chapters;
+      } catch (e) {}
+    }
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(booksDir, bookFileName(book.id)), 'utf8'));
+    return asArray(parsed && parsed.chapters);
+  } catch (e) {
+    return [];
+  }
 }
 
 // Size of one regular file; anything unreadable or not a file weighs nothing.
@@ -303,11 +494,13 @@ export function inspectLibraryDir(dir) {
   } catch (error) {
     names = [];
   }
-  // One book is a `.txt` body (or the `.json` older versions wrote) plus, if it
-  // had pictures, an `.assets` folder beside it. Folders are not books.
-  result.books = names.filter(function body(name) {
-    return /\.(?:txt|json)$/i.test(name);
-  }).length;
+  const bookIds = new Set();
+  names.forEach(function count(name) {
+    const m = name.match(/--([A-Za-z0-9._-]+)\.(?:txt|md|epub)$/i) || name.match(/^([A-Za-z0-9._-]+)\.json$/i);
+    if (m) bookIds.add(m[1]);
+    else if (/\.(?:txt|md|json)$/i.test(name)) bookIds.add(name);
+  });
+  result.books = bookIds.size;
   names.forEach(function weigh(name) {
     const full = path.join(target, 'books', name);
     if (/\.assets$/i.test(name)) {
@@ -318,7 +511,7 @@ export function inspectLibraryDir(dir) {
       } catch (error) {
         /* A folder we cannot list simply contributes nothing. */
       }
-    } else if (/\.(?:txt|json)$/i.test(name)) {
+    } else if (/\.(?:txt|md|json)$/i.test(name)) {
       result.bytes.bodies += fileBytes(full);
     } else if (/\.epub$/i.test(name)) {
       result.bytes.sources += fileBytes(full);
