@@ -2148,12 +2148,14 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   animation:sr-fade .16s ease;
 }
 .sr-sheet{
-  position:absolute;z-index:41;left:50%;bottom:20px;width:min(560px,calc(100% - 32px));max-height:calc(100% - 36px);overflow-y:auto;
+  position:absolute;z-index:41;left:50%;bottom:20px;transform:translateX(-50%);
+  width:min(560px,calc(100% - 32px));max-height:calc(100% - 36px);overflow-y:auto;
+  box-sizing:border-box;
   padding:22px 24px 20px;border-radius:22px;border:1px solid color-mix(in srgb,var(--sr-line) 85%,transparent);
   background:color-mix(in srgb,var(--sr-panel) 94%,transparent);color:var(--sr-ink);
   box-shadow:0 32px 80px -20px rgba(0,0,0,.45),0 4px 16px -4px rgba(0,0,0,.1);
   backdrop-filter:blur(28px) saturate(1.2);-webkit-backdrop-filter:blur(28px) saturate(1.2);
-  animation:sr-sheet-up .22s cubic-bezier(.16,1,.3,1);
+  animation:sr-sheet-up .22s cubic-bezier(.16,1,.3,1) both;
 }
 .sr-sheet::before{
   content:"";display:block;width:36px;height:4px;border-radius:2px;

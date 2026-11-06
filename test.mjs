@@ -2210,9 +2210,10 @@ for (const char of css) {
   assert.ok(depth >= 0, 'CSS braces do not underflow');
 }
 assert.equal(depth, 0, 'CSS braces are balanced');
-for (const selector of ['.sr-reader', '.sr-columns', '.sr-search-field', '.sr-note-editor', '.sr-drop-overlay', '.sr-page-jump-popover', '.sr-page-jump-input', '.sr-review-card-action', '.sr-color-filter-pill', '.sr-shelf-select', '.sr-bulk-action', '.sr-bulk-done', '.sr-shelf-delete-bar', '.sr-bulk-menu', '.sr-shelf-bulk-tag', '.sr-select-check']) {
+for (const selector of ['.sr-reader', '.sr-columns', '.sr-search-field', '.sr-note-editor', '.sr-drop-overlay', '.sr-page-jump-popover', '.sr-page-jump-input', '.sr-review-card-action', '.sr-color-filter-pill', '.sr-shelf-select', '.sr-bulk-action', '.sr-bulk-done', '.sr-shelf-delete-bar', '.sr-bulk-menu', '.sr-shelf-bulk-tag', '.sr-select-check', '.sr-sheet']) {
   assert.ok(css.includes(selector), 'CSS has ' + selector);
 }
+assert.ok(css.includes('.sr-sheet{') && css.includes('transform:translateX(-50%)'), 'settings sheet must stay centered horizontally');
 
 console.log('PASS  manifest + icon + locale metadata');
 console.log('PASS  client module, slot registration, dictionary registration');
