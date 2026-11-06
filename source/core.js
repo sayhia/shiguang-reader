@@ -2297,6 +2297,8 @@
           if (at < 0) break;
           const beforeStart = Math.max(0, at - 42);
           const afterEnd = Math.min(text.length, at + needle.length + 78);
+          const wideBeforeStart = Math.max(0, at - 120);
+          const wideAfterEnd = Math.min(text.length, at + needle.length + 180);
           results.push({
             chapterIndex: typeof chapter.chapterIndex === 'number' ? chapter.chapterIndex : index,
             chapterId: chapter.id,
@@ -2307,6 +2309,8 @@
             before: collapseWhitespace(text.slice(beforeStart, at)),
             match: text.slice(at, at + needle.length),
             after: collapseWhitespace(text.slice(at + needle.length, afterEnd)),
+            wideBefore: collapseWhitespace(text.slice(wideBeforeStart, at)),
+            wideAfter: collapseWhitespace(text.slice(at + needle.length, wideAfterEnd)),
           });
           from = at + Math.max(1, needle.length);
         }
@@ -2804,4 +2808,18 @@
 
     function coverFor(book) {
       return book.cover || LOCAL_COVERS[0];
+    }
+
+    // Round 49: Privacy-first Zero-PII reader telemetry contract
+    function emitReaderTelemetry(eventName, eventData) {
+      const allowedEvents = ['render_latency', 'reflow', 'theme_change', 'session_tick', 'notes_export'];
+      if (!allowedEvents.includes(eventName)) return null;
+      const data = eventData && typeof eventData === 'object' ? eventData : {};
+      return {
+        event: eventName,
+        timestamp: Date.now(),
+        themeId: typeof data.themeId === 'string' ? data.themeId : undefined,
+        durationMs: typeof data.durationMs === 'number' ? Math.round(data.durationMs) : undefined,
+        pageCount: typeof data.pageCount === 'number' ? data.pageCount : undefined,
+      };
     }

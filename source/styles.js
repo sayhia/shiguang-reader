@@ -2660,4 +2660,28 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
   .sr-reader-btn--primary{background:Highlight !important;color:HighlightText !important;}
   :focus-visible{outline:2px solid Highlight !important;}
 }
+
+/* Round 41 & 48: RTL Typography & Low-End Hardware Degradation */
+.sr-columns[dir="rtl"], [dir="rtl"] .sr-columns {
+  direction: rtl;
+  text-align: right;
+  unicode-bidi: isolate;
+}
+.sr-columns[dir="rtl"] blockquote {
+  border-left: none;
+  border-right: 3px solid var(--sr-accent);
+  padding-left: 1em;
+  padding-right: 1.2em;
+}
+.sr-reader.sr-perf-lite,
+.sr-perf-lite .sr-glass,
+.sr-perf-lite .sr-reader-top,
+.sr-perf-lite .sr-reader-bottom,
+.sr-perf-lite .sr-drawer,
+.sr-perf-lite .sr-sheet {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+  transition: none !important;
+}
 `;

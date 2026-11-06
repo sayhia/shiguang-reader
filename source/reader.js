@@ -1775,7 +1775,10 @@
                                 onClick: function copy(event) {
                                   event.stopPropagation();
                                   event.preventDefault();
-                                  const snippet = (item.before + item.match + item.after).trim();
+                                  const isExpanded = index === searchCursor;
+                                  const lead = isExpanded ? (item.wideBefore || item.before) : item.before;
+                                  const tail = isExpanded ? (item.wideAfter || item.after) : item.after;
+                                  const snippet = (lead + item.match + tail).trim();
                                   const quote = buildQuoteText(snippet, book.title, item.chapterTitle);
                                   copyTextToClipboard(quote).then(function done(ok) {
                                     props.showToast(ok ? t('quoteCopied') : t('copyFailed'));
@@ -1786,9 +1789,9 @@
                             ),
                           ),
                           h('p', { className: 'sr-search-result-text' },
-                            item.before,
+                            index === searchCursor ? (item.wideBefore || item.before) : item.before,
                             h('mark', null, item.match),
-                            item.after,
+                            index === searchCursor ? (item.wideAfter || item.after) : item.after,
                           ),
                         );
                       }),
