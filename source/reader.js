@@ -211,34 +211,70 @@
         setChapterIndex(index);
       }, [chapterIndex, chapters, pageCount, dismissPopovers, props.chapterMarks, showChapterHud]);
 
+      const audioCtxRef = useRef(null);
+      const playPaperSound = useCallback(function playSound() {
+        if (!settings.paperSound) return;
+        try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContext) return;
+          if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+          const ctx = audioCtxRef.current;
+          if (ctx.state === 'suspended') ctx.resume();
+          const bufferSize = Math.floor(ctx.sampleRate * 0.042);
+          const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+          const data = buffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+          }
+          const noise = ctx.createBufferSource();
+          noise.buffer = buffer;
+          const filter = ctx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.setValueAtTime(650, ctx.currentTime);
+          const gain = ctx.createGain();
+          gain.gain.setValueAtTime(0.045, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.042);
+          noise.connect(filter);
+          filter.connect(gain);
+          gain.connect(ctx.destination);
+          noise.start();
+        } catch (e) {
+          /* audio unavailable or blocked */
+        }
+      }, [settings.paperSound]);
+
       const nextPage = useCallback(function next() {
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page < pageCount - 1) {
+          playPaperSound();
           setPage(page + 1);
           return;
         }
         if (chapterIndex < chapters.length - 1) {
+          playPaperSound();
           goChapter(chapterIndex + 1, 'start');
           return;
         }
         props.onFinish(book.id);
         props.showToast(t('readerFinished'));
-      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, props.onFinish, props.showToast, t]);
+      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t]);
 
       const prevPage = useCallback(function previous() {
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page > 0) {
+          playPaperSound();
           setPage(page - 1);
           return;
         }
         if (chapterIndex > 0) {
+          playPaperSound();
           goChapter(chapterIndex - 1, 'last');
           return;
         }
         props.showToast(t('firstPage'));
-      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, props.showToast, t]);
+      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t]);
 
       const applySettings = useCallback(function update(patch) {
         if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
@@ -1917,6 +1953,22 @@
               ),
             ),
             h('div', { className: 'sr-setting-group' },
+              h('div', { className: 'sr-setting-toggle-row' },
+                h('div', null,
+                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('paperSound')),
+                  h('p', { className: 'sr-setting-hint' }, t('paperSoundHint')),
+                ),
+                h('button', {
+                  type: 'button',
+                  role: 'switch',
+                  className: 'sr-switch',
+                  'aria-checked': settings.paperSound === true,
+                  'aria-label': t('paperSound'),
+                  onClick: function toggleSound() { applySettings({ paperSound: !settings.paperSound }); },
+                }, h('span', { className: 'sr-switch-thumb' })),
+              ),
+            ),
+            h('div', { className: 'sr-setting-group' },
               h('div', { className: 'sr-setting-label' }, t('speechVoice')),
               voices.length
                 ? h('select', {
@@ -1949,6 +2001,7 @@
                     pageWidth: 'comfortable',
                     textAlign: 'justify',
                     autoHideChrome: false,
+                    paperSound: false,
                   });
                   props.showToast(t('settingsReset'));
                 },

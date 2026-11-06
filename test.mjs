@@ -168,14 +168,15 @@ const normalized = T.normalizeState({
 });
 assert.deepEqual(plain(normalized.settings), {
   theme: 'paper', fontSize: 28, lineHeight: 1.5, fontFamily: 'serif',
-  letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
+  letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false, paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
   textAlign: 'justify',
 });
-const customTypography = T.normalizeState({ settings: { letterSpacing: 1, paragraphSpacing: 0, pageWidth: 'massive', textAlign: 'left' } });
+const customTypography = T.normalizeState({ settings: { letterSpacing: 1, paragraphSpacing: 0, pageWidth: 'massive', textAlign: 'left', paperSound: true } });
 assert.equal(customTypography.settings.letterSpacing, 0.12);
 assert.equal(customTypography.settings.paragraphSpacing, 0.5);
 assert.equal(customTypography.settings.pageWidth, 'comfortable');
 assert.equal(customTypography.settings.autoHideChrome, false);
+assert.equal(customTypography.settings.paperSound, true);
 assert.equal(customTypography.settings.textAlign, 'left');
 assert.equal(T.normalizeState({ settings: { autoHideChrome: true } }).settings.autoHideChrome, true);
 assert.equal(T.normalizeState({ settings: { highlightColor: 'sky' } }).settings.highlightColor, 'sky');
