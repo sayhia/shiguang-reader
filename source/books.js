@@ -16,6 +16,7 @@
       { id: 'forest', bg: '#121c18', panel: '#1a2721', ink: '#c3d6cc', muted: '#769183', line: 'rgba(180,210,195,0.12)', accent: '#65a982', wash: 'rgba(101,169,130,0.14)' },
       { id: 'night', bg: '#14191c', panel: '#1d2428', ink: '#c9c3b6', muted: '#7f8885', line: 'rgba(206,198,181,0.13)', accent: '#c8a46c', wash: 'rgba(200,164,108,0.1)' },
       { id: 'oled', bg: '#000000', panel: '#0d0d0e', ink: '#b8b5ab', muted: '#73736c', line: 'rgba(255,255,255,0.1)', accent: '#c49d64', wash: 'rgba(196,157,100,0.14)' },
+      { id: 'eink', bg: '#ffffff', panel: '#ffffff', ink: '#000000', muted: '#444444', line: 'rgba(0,0,0,0.22)', accent: '#000000', wash: 'rgba(0,0,0,0.08)' },
     ];
 
     const HIGHLIGHT_COLORS = [

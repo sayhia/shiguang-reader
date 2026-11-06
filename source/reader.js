@@ -82,6 +82,7 @@
       const [tocQuery, setTocQuery] = useState('');
       const [notesQuery, setNotesQuery] = useState('');
       const [notesColorFilter, setNotesColorFilter] = useState('all');
+      const [timeMode, setTimeMode] = useState('chapterTime');
       const [fontQuickOpen, setFontQuickOpen] = useState(false);
       const [hoverScrub, setHoverScrub] = useState(null);
       const [fontHud, setFontHud] = useState(0);
@@ -650,6 +651,28 @@
         });
         return function cleanup() { window.cancelAnimationFrame(frame); };
       }, [noteDraft]);
+
+      useEffect(function scrollCurrentTocIntoView() {
+        if (drawer !== 'toc') return;
+        const frame = window.requestAnimationFrame(function scroll() {
+          const active = document.querySelector('.sr-toc-row[data-current="true"]');
+          if (active && typeof active.scrollIntoView === 'function') {
+            active.scrollIntoView({ block: 'center', behavior: 'instant' });
+          }
+        });
+        return function cleanup() { window.cancelAnimationFrame(frame); };
+      }, [drawer, chapterIndex]);
+
+      useEffect(function scrollActiveSearchIntoView() {
+        if (drawer !== 'search' || searchCursor < 0) return;
+        const frame = window.requestAnimationFrame(function scroll() {
+          const active = document.querySelector('.sr-search-result[data-active="true"]');
+          if (active && typeof active.scrollIntoView === 'function') {
+            active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        });
+        return function cleanup() { window.cancelAnimationFrame(frame); };
+      }, [drawer, searchCursor]);
 
       useEffect(function clearSuppressTimer() {
         return function cleanup() {
@@ -2485,7 +2508,21 @@
                   h('button', { type: 'submit', className: 'sr-page-jump-btn' }, t('jumpBtn')),
                 ) : null,
               ),
-              h('span', { className: 'sr-reader-time', title: clockText }, remainingLabel + (isFullscreen ? ' · ' + clockText : '')),
+              h('span', {
+                className: 'sr-reader-time',
+                title: t('readerProgress'),
+                onClick: function cycleTime() {
+                  setTimeMode(function next(m) {
+                    if (m === 'chapterTime') return 'bookPercent';
+                    if (m === 'bookPercent') return 'clock';
+                    return 'chapterTime';
+                  });
+                },
+              }, timeMode === 'bookPercent'
+                ? fill(t('tocReadPercent'), { n: overallBookPct }) + (isFullscreen ? ' · ' + clockText : '')
+                : (timeMode === 'clock'
+                  ? clockText
+                  : remainingLabel + (isFullscreen ? ' · ' + clockText : ''))),
             ),
             h('button', {
               type: 'button',

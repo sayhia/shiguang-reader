@@ -1408,6 +1408,9 @@ body:has(.sr-reader) [data-rightbar-col]{
 .sr-reader[data-theme="night"]::before{opacity:.18;}
 .sr-reader[data-theme="oled"]{--sr-bg:#000000;--sr-panel:#0d0d0e;--sr-ink:#b8b5ab;--sr-muted:#73736c;--sr-line:rgba(255,255,255,.1);--sr-accent:#c49d64;--sr-wash:rgba(196,157,100,.14);}
 .sr-reader[data-theme="oled"]::before{display:none;}
+.sr-reader[data-theme="eink"]{--sr-bg:#ffffff;--sr-panel:#ffffff;--sr-ink:#000000;--sr-muted:#444444;--sr-line:rgba(0,0,0,.22);--sr-accent:#000000;--sr-wash:rgba(0,0,0,.08);}
+.sr-reader[data-theme="eink"]::before{display:none;}
+.sr-reader[data-theme="eink"] *{text-shadow:none !important;box-shadow:none !important;transition:none !important;animation:none !important;}
 .sr-card-theme[data-theme="oled"] .sr-card-theme-dot{background:#000000;border:1px solid rgba(255,255,255,.25);}
 .sr-reader ::selection{background:color-mix(in srgb,var(--sr-accent) 26%,transparent);}
 .sr-reader-top{
@@ -1892,7 +1895,8 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-reader-range:active::-webkit-slider-thumb{transform:scale(1.35);box-shadow:0 0 0 5px color-mix(in srgb,var(--sr-accent) 32%,transparent),0 2px 9px rgba(0,0,0,.45);}
 .sr-reader-range::-moz-range-track{height:3.5px;border-radius:999px;background:color-mix(in srgb,var(--sr-ink) 13%,transparent);}
 .sr-reader-range::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:var(--sr-accent);border:2px solid var(--sr-panel);}
-.sr-reader-time{font-family:${UI_FONT};font-size:9px;font-weight:500;color:var(--sr-muted);white-space:nowrap;opacity:.8;font-variant-numeric:tabular-nums;}
+.sr-reader-time{font-family:${UI_FONT};font-size:9px;font-weight:500;color:var(--sr-muted);white-space:nowrap;opacity:.8;font-variant-numeric:tabular-nums;cursor:pointer;user-select:none;transition:all .12s ease;}
+.sr-reader-time:hover{color:var(--sr-ink);opacity:1;}
 .sr-page-jump-anchor{position:relative;display:inline-flex;align-items:center;}
 .sr-reader-progress-label{
   background:color-mix(in srgb,var(--sr-ink) 4%,transparent);border:1px solid color-mix(in srgb,var(--sr-line) 70%,transparent);

@@ -741,7 +741,7 @@
 
     function clampSettings(raw) {
       const value = raw && typeof raw === 'object' ? raw : {};
-      const themes = ['paper', 'candle', 'snow', 'mint', 'forest', 'night', 'oled', 'auto'];
+      const themes = ['paper', 'candle', 'snow', 'mint', 'forest', 'night', 'oled', 'eink', 'auto'];
       const widths = ['compact', 'comfortable', 'wide'];
       const letterValue = Number(value.letterSpacing);
       const paragraphValue = Number(value.paragraphSpacing);
