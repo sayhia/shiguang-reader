@@ -1325,7 +1325,9 @@
         description: typeof raw.description === 'string' ? raw.description.slice(0, 500) : '从本地导入的文本，保存在此浏览器中。',
         tags: Array.isArray(raw.tags) ? raw.tags.filter(function tag(tag) { return typeof tag === 'string'; }).slice(0, 8) : ['本地导入'],
         source: 'local',
-        format: raw.format === 'epub' ? 'epub' : undefined,
+        format: (raw.format === 'epub' || raw.format === 'markdown' || raw.format === 'txt')
+          ? raw.format
+          : (/\.md$/i.test(raw.title) ? 'markdown' : undefined),
         addedAt: Number.isFinite(raw.addedAt) ? raw.addedAt : Date.now(),
         coverImage: coverImage,
         chaptersInFs: bodyInFs || undefined,

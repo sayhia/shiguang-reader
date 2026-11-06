@@ -612,6 +612,39 @@
       }
       const known = typeof book === 'object' && book ? book.chapterIds : undefined;
       const directory = await fsBooksDirectory(false);
+
+      // If it is an EPUB book and the original .epub archive is available, read directly from it!
+      if (book && typeof book === 'object' && (book.format === 'epub' || (book.tags && book.tags.indexOf('EPUB') >= 0))) {
+        let epubHandle = null;
+        try {
+          epubHandle = await directory.getFileHandle(fsSourceFileName(book, 'epub'), { create: false });
+        } catch (e) {
+          const suffix = fsSourceSuffix(id);
+          for await (const entry of directory.values()) {
+            if (entry.kind === 'file' && entry.name.endsWith(suffix)) {
+              epubHandle = await directory.getFileHandle(entry.name, { create: false });
+              break;
+            }
+          }
+        }
+        if (epubHandle) {
+          try {
+            const epubFile = await epubHandle.getFile();
+            const parsed = await parseEpubBook(book.title, epubFile, options);
+            if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
+              if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
+                parsed.chapters.forEach(function mapId(c, i) {
+                  if (known[i]) c.id = known[i];
+                });
+              }
+              return parsed.chapters;
+            }
+          } catch (err) {
+            /* Fall back to reading body file */
+          }
+        }
+      }
+
       let file = null;
       if (book && typeof book === 'object' && book.title && book.id) {
         try {
