@@ -371,13 +371,13 @@
         let lastSwipe = 0;
         function onWheel(event) {
           if (event.ctrlKey || event.metaKey) return;
-          const dx = Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+          const dominant = Math.abs(event.deltaX) >= Math.abs(event.deltaY)
             ? event.deltaX
-            : (event.shiftKey ? event.deltaY : 0);
-          if (Math.abs(dx) < 2) return;
-          deltaAccum += dx;
+            : event.deltaY;
+          if (Math.abs(dominant) < 3) return;
+          deltaAccum += dominant;
           const now = Date.now();
-          if (Math.abs(deltaAccum) >= 42 && (now - lastSwipe) > 320) {
+          if (Math.abs(deltaAccum) >= 48 && (now - lastSwipe) > 340) {
             if (deltaAccum > 0) {
               nextPage();
             } else {
@@ -2166,6 +2166,16 @@
             onPointerUp: handlePointerUp,
             onClick: handleStageClick,
           },
+            currentBookmark ? h('button', {
+              type: 'button',
+              className: 'sr-page-bookmark-ribbon',
+              title: currentBookmark.note ? t('bookmarkNoteTitle') + ': ' + currentBookmark.note : t('readerBookmarkOn'),
+              'aria-label': t('readerBookmarkOn'),
+              onClick: function onRibbonClick(e) {
+                e.stopPropagation();
+                setBookmarkDraft(currentBookmark);
+              },
+            }) : null,
             h('div', {
               className: 'sr-page-track',
               'data-instant': animate ? 'false' : 'true',
