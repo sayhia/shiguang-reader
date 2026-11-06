@@ -1876,7 +1876,7 @@
               h('div', { className: 'sr-setting-label' },
                 t('theme'),
                 h('span', null, settings.theme === 'auto'
-                  ? (t('themeAuto') + ' (' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)) + ')')
+                  ? (t('themeAuto') + ' · ' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
                   : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
               ),
               h('div', { className: 'sr-theme-grid' },
@@ -1901,7 +1901,7 @@
                   'aria-pressed': settings.theme === 'auto',
                   'aria-label': t('themeAuto'),
                   title: t('themeAuto'),
-                  style: { '--sw-bg': 'linear-gradient(135deg, #f3ede2 0%, #f3ede2 52%, #151a1d 52%, #151a1d 100%)', '--sw-ink': '#322920' },
+                  style: { '--sw-bg': 'linear-gradient(to right, #f3ede2 0%, #f3ede2 50%, #151a1d 50%, #151a1d 100%)', '--sw-ink': '#322920' },
                   onClick: function pick() { applySettings({ theme: 'auto' }); },
                 },
                   h('span', null, t('themeAuto')),
