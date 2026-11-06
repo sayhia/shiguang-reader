@@ -823,7 +823,8 @@
     // Maps a settings.theme value to a concrete palette; 'auto' follows the OS color scheme.
     function resolveReaderTheme(theme, prefersDark) {
       if (theme === 'auto') return prefersDark === true ? 'night' : 'paper';
-      return ['paper', 'snow', 'mint', 'night'].indexOf(theme) >= 0 ? theme : 'paper';
+      const valid = ['paper', 'candle', 'snow', 'mint', 'forest', 'night', 'oled', 'eink'];
+      return valid.indexOf(theme) >= 0 ? theme : 'paper';
     }
 
     // Adds or removes one id from a capped id list, keeping insertion order.

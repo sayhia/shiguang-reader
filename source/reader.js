@@ -97,6 +97,8 @@
       const [zoomImage, setZoomImage] = useState(null);
       const pageJumpInputRef = useRef(null);
       const [systemDark, setSystemDark] = useState(readSystemDark);
+      const activeThemeId = resolveReaderTheme(settings.theme, systemDark);
+      const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
       const sleepTimerRef = useRef(null);
       const fontHudTimerRef = useRef(null);
       const chapterHudTimerRef = useRef(null);
@@ -744,6 +746,19 @@
         }
       }, [chapterIndex, chapters, page, pageCount]);
 
+      useEffect(function syncAppThemeBackground() {
+        if (!readerRef.current) return;
+        const app = readerRef.current.closest('.sr-app');
+        if (app) {
+          app.style.setProperty('--sr-bg', currentTheme.bg, 'important');
+          app.style.setProperty('background', currentTheme.bg, 'important');
+        }
+        const centerCol = readerRef.current.closest('[class*="_centerCol"]');
+        if (centerCol) {
+          centerCol.style.setProperty('background', currentTheme.bg, 'important');
+        }
+      }, [activeThemeId, currentTheme.bg]);
+
       useEffect(function focusSearch() {
         if (drawer !== 'search') return undefined;
         const frame = window.requestAnimationFrame(function focus() {
@@ -1390,9 +1405,6 @@
         });
       }, [chapter.id, chapter.paragraphs, chapter.images, chapterHighlights, offsets]);
 
-      const activeThemeId = resolveReaderTheme(settings.theme, systemDark);
-      const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
-
       function drawerNotes() {
         const q = notesQuery.trim().toLowerCase();
         const filteredHighlights = bookHighlights
@@ -1861,7 +1873,12 @@
               ),
             ),
             h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('theme'), h('span', null, currentTheme.id)),
+              h('div', { className: 'sr-setting-label' },
+                t('theme'),
+                h('span', null, settings.theme === 'auto'
+                  ? (t('themeAuto') + ' (' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)) + ')')
+                  : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
+              ),
               h('div', { className: 'sr-theme-grid' },
                 READER_THEMES.map(function swatch(themeItem) {
                   return h('button', {
@@ -1884,7 +1901,7 @@
                   'aria-pressed': settings.theme === 'auto',
                   'aria-label': t('themeAuto'),
                   title: t('themeAuto'),
-                  style: { '--sw-bg': 'linear-gradient(135deg, #f2eadb 0%, #f2eadb 52%, #14191c 52%, #14191c 100%)', '--sw-ink': '#3a3024' },
+                  style: { '--sw-bg': 'linear-gradient(135deg, #f3ede2 0%, #f3ede2 52%, #151a1d 52%, #151a1d 100%)', '--sw-ink': '#322920' },
                   onClick: function pick() { applySettings({ theme: 'auto' }); },
                 },
                   h('span', null, t('themeAuto')),

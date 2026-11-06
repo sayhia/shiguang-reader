@@ -64,6 +64,14 @@ body:has(.sr-reader) [data-rightbar-col]{
   border-left:none !important;
   box-sizing:border-box !important;
 }
+.sr-app:has(.sr-reader[data-theme="paper"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="paper"]), [class*="_centerCol"]:has(.sr-reader[data-theme="paper"]){ background:#f3ede2 !important; }
+.sr-app:has(.sr-reader[data-theme="candle"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="candle"]), [class*="_centerCol"]:has(.sr-reader[data-theme="candle"]){ background:#f4e6ce !important; }
+.sr-app:has(.sr-reader[data-theme="snow"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="snow"]), [class*="_centerCol"]:has(.sr-reader[data-theme="snow"]){ background:#f8f7f4 !important; }
+.sr-app:has(.sr-reader[data-theme="mint"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="mint"]), [class*="_centerCol"]:has(.sr-reader[data-theme="mint"]){ background:#e6eee4 !important; }
+.sr-app:has(.sr-reader[data-theme="forest"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="forest"]), [class*="_centerCol"]:has(.sr-reader[data-theme="forest"]){ background:#121c18 !important; }
+.sr-app:has(.sr-reader[data-theme="night"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="night"]), [class*="_centerCol"]:has(.sr-reader[data-theme="night"]){ background:#151a1d !important; }
+.sr-app:has(.sr-reader[data-theme="oled"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="oled"]), [class*="_centerCol"]:has(.sr-reader[data-theme="oled"]){ background:#000000 !important; }
+.sr-app:has(.sr-reader[data-theme="eink"]), .PIRFFq_centerCol:has(.sr-reader[data-theme="eink"]), [class*="_centerCol"]:has(.sr-reader[data-theme="eink"]){ background:#ffffff !important; }
 .sr-app *,.sr-app *::before,.sr-app *::after{box-sizing:border-box;}
 /* :where() keeps these resets at zero specificity so component rules (color, font-size) still win. */
 .sr-app :where(button,input,textarea){font:inherit;}
@@ -2182,7 +2190,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-pan
 .sr-book-last{font-size:10px;color:var(--sr-muted,#8a7860);margin-top:2px;line-height:1.2;}
 .sr-book-row-side .sr-book-last{font-size:10px;color:var(--sr-muted,#8a7860);}
 .sr-theme-swatch--auto{grid-column:1 / -1;height:44px;}
-.sr-theme-swatch--auto::before{left:9px;right:auto;}
+.sr-theme-swatch--auto::before{right:14px;left:auto;top:10px;}
 .sr-theme-swatch[aria-pressed="true"]{box-shadow:0 0 0 2px var(--sr-panel),0 0 0 4px var(--sr-accent);}
 .sr-theme-check{
   position:absolute;top:6px;left:7px;
