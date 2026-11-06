@@ -804,7 +804,7 @@
         if (!text.trim()) return;
         suppressNextClick();
         const rect = range.getBoundingClientRect();
-        const position = popoverPosition(rect, 158);
+        const position = popoverPosition(rect, 188);
         setSelectionColor(null);
         setToolbar({
           start: startOffset,
@@ -898,6 +898,17 @@
         } catch (error) {
           props.showToast(t('copied'));
         }
+        setToolbar(null);
+      }
+
+      function searchSelectionText() {
+        if (!toolbar) return;
+        const query = toolbar.text.trim();
+        if (!query) return;
+        setSearchText(query);
+        setSearchQuery(query);
+        setSearchCursor(-1);
+        setDrawer('search');
         setToolbar(null);
       }
 
@@ -1608,7 +1619,10 @@
                     'aria-label': t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1)),
                     style: { '--sw-bg': themeItem.bg, '--sw-ink': themeItem.ink },
                     onClick: function pick() { applySettings({ theme: themeItem.id }); },
-                  }, h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))));
+                  },
+                    h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))),
+                    settings.theme === themeItem.id ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
+                  );
                 }),
                 h('button', {
                   key: 'auto',
@@ -1619,7 +1633,10 @@
                   title: t('themeAuto'),
                   style: { '--sw-bg': 'linear-gradient(135deg, #f2eadb 0%, #f2eadb 52%, #14191c 52%, #14191c 100%)', '--sw-ink': '#3a3024' },
                   onClick: function pick() { applySettings({ theme: 'auto' }); },
-                }, h('span', null, t('themeAuto'))),
+                },
+                  h('span', null, t('themeAuto')),
+                  settings.theme === 'auto' ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
+                ),
               ),
             ),
             h('div', { className: 'sr-setting-group' },
@@ -2061,7 +2078,7 @@
               'aria-label': fill(t('openChapterTocHint'), { n: chapterIndex + 1 }),
               onClick: function toggleToc() { setDrawer(drawer === 'toc' ? null : 'toc'); },
             },
-              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '')),
+              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + Math.round(progressPercentValue * 100) + '%'),
               h('strong', null, chapter.title),
             ),
             h('button', {
@@ -2203,7 +2220,12 @@
                   h('h1', { className: 'sr-chapter-title' }, chapter.title),
                 ),
                 paragraphNodes,
-                h('div', { className: 'sr-chapter-end', ref: endRef }, '· ' + t('chapterEnd') + ' ·'),
+                chapterIndex >= chapters.length - 1
+                  ? h('div', { className: 'sr-chapter-end sr-chapter-end--book', ref: endRef },
+                      h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
+                      h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
+                    )
+                  : h('div', { className: 'sr-chapter-end', ref: endRef }, '· ' + t('chapterEnd') + ' ·'),
               ),
             ),
           ),
@@ -2409,6 +2431,11 @@
           h('button', { type: 'button', className: 'sr-sel-btn', title: t('selectionCopy'), onClick: copyToolbarText },
             h(Icon, { name: 'copy', size: 13 }),
             h('span', null, t('selectionCopy')),
+          ),
+          h('span', { className: 'sr-sel-divider', 'aria-hidden': 'true' }),
+          h('button', { type: 'button', className: 'sr-sel-btn', title: t('searchInBook'), onClick: searchSelectionText },
+            h(Icon, { name: 'search', size: 13 }),
+            h('span', null, t('searchInBook')),
           ),
         ) : null,
         peek && peekHighlight ? h('div', {
