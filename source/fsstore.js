@@ -182,9 +182,8 @@
     }
 
     function fsBodyFileName(book) {
-      const format = (book && book.format) || (book && /\.md$/i.test(book.title) ? 'markdown' : 'txt');
-      if (format === 'markdown') return fsBookStem(book) + '.md';
-      if (format === 'epub') return fsBookStem(book) + '.epub';
+      if (isEpubBook(book)) return fsBookStem(book) + '.epub';
+      if (isMarkdownBook(book)) return fsBookStem(book) + '.md';
       return fsBookStem(book) + '.txt';
     }
 
@@ -405,8 +404,16 @@
       if (!book || !book.id) throw new Error('fs-no-book');
       const writePromise = (async function doWrite() {
         const directory = await fsBooksDirectory(true);
-        if (book.format === 'epub') {
+        if (isEpubBook(book)) {
           await fsWriteBookSource(directory, book);
+          const txtSuffix = fsBodySuffix(book.id);
+          const mdSuffix = fsMdSuffix(book.id);
+          for await (const entry of directory.values()) {
+            if (entry.kind === 'file' && (entry.name.endsWith(txtSuffix) || entry.name.endsWith(mdSuffix))) {
+              await fsRemoveEntry(directory, entry.name, false);
+            }
+          }
+          await fsRemoveEntry(directory, fsBookFileName(book.id));
           return true;
         }
         const skipImages = Boolean(options && options.skipImages);
@@ -437,14 +444,15 @@
       if (!book || !book.id) throw new Error('fs-no-book');
       const writePromise = (async function doWrite() {
         const directory = await fsBooksDirectory(true);
-        if (book.format === 'epub') {
+        if (isEpubBook(book)) {
           await fsAdoptStaleSource(directory, book);
           const wroteSource = await fsWriteBookSource(directory, book);
           if (wroteSource) fsSourceImages.delete(book.id);
           await fsRemoveEntry(directory, fsBookFileName(book.id));
           const txtSuffix = fsBodySuffix(book.id);
+          const mdSuffix = fsMdSuffix(book.id);
           for await (const entry of directory.values()) {
-            if (entry.kind === 'file' && entry.name.endsWith(txtSuffix)) {
+            if (entry.kind === 'file' && (entry.name.endsWith(txtSuffix) || entry.name.endsWith(mdSuffix))) {
               await fsRemoveEntry(directory, entry.name, false);
             }
           }
@@ -629,9 +637,10 @@
       }
       const known = typeof book === 'object' && book ? book.chapterIds : undefined;
       const directory = await fsBooksDirectory(false);
+      const isEpub = isEpubBook(book);
 
       // If it is an EPUB book and the original .epub archive is available, read directly from it!
-      if (book && typeof book === 'object' && (book.format === 'epub' || (book.tags && book.tags.indexOf('EPUB') >= 0))) {
+      if (isEpub) {
         let epubHandle = null;
         try {
           epubHandle = await directory.getFileHandle(fsSourceFileName(book, 'epub'), { create: false });
@@ -646,13 +655,21 @@
         }
         if (epubHandle) {
           try {
-            const epubFile = await epubHandle.getFile();
-            const parsed = await parseEpubBook(book.title, epubFile, options);
+            const raw = await epubHandle.getFile();
+            const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
+            const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
+            const parsed = await parseEpubBook((book && book.title) || epubHandle.name.replace(/\.epub$/i, ''), input, options);
             if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
               if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
                 parsed.chapters.forEach(function mapId(c, i) {
                   if (known[i]) c.id = known[i];
                 });
+              }
+              const txtSuffix = fsBodySuffix(id);
+              for await (const entry of directory.values()) {
+                if (entry.kind === 'file' && entry.name.endsWith(txtSuffix)) {
+                  await fsRemoveEntry(directory, entry.name, false);
+                }
               }
               return parsed.chapters;
             }
@@ -663,9 +680,11 @@
       }
 
       let file = null;
+      let bodyName = '';
       if (book && typeof book === 'object' && book.title && book.id) {
+        bodyName = fsBodyFileName(book);
         try {
-          file = await directory.getFileHandle(fsBodyFileName(book), { create: false });
+          file = await directory.getFileHandle(bodyName, { create: false });
         } catch (error) {
           file = null;
         }
@@ -673,11 +692,21 @@
       if (!file) {
         const suffix = fsBodySuffix(id);
         const mdSuffix = fsMdSuffix(id);
-        let bodyName = '';
+        const epubSuffix = fsSourceSuffix(id);
+        bodyName = '';
         for await (const entry of directory.values()) {
-          if (entry.kind === 'file' && (entry.name.endsWith(suffix) || entry.name.endsWith(mdSuffix))) {
-            bodyName = entry.name;
-            break;
+          if (entry.kind === 'file') {
+            if (isEpub && entry.name.endsWith(epubSuffix)) {
+              bodyName = entry.name;
+              break;
+            }
+            if (!isEpub && (entry.name.endsWith(mdSuffix) || entry.name.endsWith(suffix))) {
+              bodyName = entry.name;
+              break;
+            }
+            if (!bodyName && (entry.name.endsWith(suffix) || entry.name.endsWith(mdSuffix) || entry.name.endsWith(epubSuffix))) {
+              bodyName = entry.name;
+            }
           }
         }
         if (bodyName) {
@@ -685,6 +714,21 @@
         }
       }
       if (file) {
+        const fileName = String((file && file.name) || bodyName || '');
+        if (fileName.endsWith('.epub')) {
+          const raw = await file.getFile();
+          const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
+          const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
+          const parsed = await parseEpubBook((book && book.title) || fileName.replace(/\.epub$/i, ''), input, options);
+          if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
+            if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
+              parsed.chapters.forEach(function mapId(c, i) {
+                if (known[i]) c.id = known[i];
+              });
+            }
+            return parsed.chapters;
+          }
+        }
         const text = await (await file.getFile()).text();
         const chapters = parseBookBodyText(text, known);
         if (!(options && options.skipImages === true)) await fsReadChapterImages(directory, chapters, id);
@@ -773,12 +817,16 @@
       for (let index = 0; index < names.length; index += 1) {
         const book = byLegacyName.get(names[index]);
         if (!book) continue;
+        if (isEpubBook(book)) {
+          await fsRemoveEntry(directory, names[index]);
+          continue;
+        }
         try {
           const chapters = Array.isArray(book.chapters) && book.chapters.length
             ? book.chapters
             : await fsReadBookBody(book);
           if (!chapters.length) continue;
-          await fsWriteBookBody({ id: book.id, title: book.title, chapters: chapters });
+          await fsWriteBookBody(Object.assign({}, book, { chapters: chapters }));
           done.push({ id: book.id, chapters: chapters });
         } catch (error) {
           /* Next launch tries again; the JSON is still there. */

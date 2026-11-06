@@ -135,7 +135,11 @@
         bytes = new Uint8Array(await dirBlob.arrayBuffer());
         view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       } else {
-        bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+        if (input && typeof input.arrayBuffer === 'function' && !(input instanceof Uint8Array)) {
+          bytes = new Uint8Array(await input.arrayBuffer());
+        } else {
+          bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+        }
         view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         length = bytes.byteLength;
         if (length < 22) throw new Error('epub-invalid');

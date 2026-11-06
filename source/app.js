@@ -532,14 +532,15 @@
 
       const handleProgress = useCallback(function progress(bookId, chapterIndex, percent) {
         setState(function apply(previous) {
-          const book = bookMap.get(bookId);
+          const custom = Array.isArray(previous.customBooks) ? previous.customBooks : [];
+          const book = bookMap.get(bookId) || custom.find(function(b) { return b && b.id === bookId; });
           if (!book) return previous;
           const cached = bookChaptersCache.get(bookId);
           const chapters = (Array.isArray(book.chapters) && book.chapters.length)
             ? book.chapters
             : (Array.isArray(cached) && cached.length ? cached : null);
           const existing = previous.progress[bookId];
-          const chapterCount = Math.max(1, chapters ? chapters.length : ((book.chapterIds && book.chapterIds.length) || 1));
+          const chapterCount = Math.max(1, chapters ? chapters.length : ((book.chapterIds && book.chapterIds.length) || (book.chapterCount) || 1));
           const nextChapter = clamp(Number(chapterIndex) || 0, 0, chapterCount - 1);
           const nextPercent = clamp(Number(percent) || 0, 0, 1);
           if (existing && existing.chapterIndex === nextChapter && Math.abs((existing.percent || 0) - nextPercent) < 0.0001) {
@@ -555,7 +556,7 @@
             updatedAt: Date.now(),
             // A zero offset means "just opened"; keep the earlier resume point instead of wiping it.
             chapterMarks: nextPercent > 0
-              ? recordChapterMark(existingMarks, chapter ? chapter.id : '', nextPercent)
+              ? recordChapterMark(existingMarks, chapter ? chapter.id : ((book.chapterIds && book.chapterIds[nextChapter]) || ''), nextPercent)
               : existingMarks,
           };
           return Object.assign({}, previous, {
@@ -1463,6 +1464,9 @@
           if (file) {
             try { fsRememberSource(book.id, file.name, file); } catch (error) { /* body can still be written */ }
           }
+          if (Array.isArray(book.chapters) && book.chapters.length) {
+            setCachedChapters(book.id, book.chapters);
+          }
           return fsWriteNewBookBody(book, { skipImages: true }).then(
             function stored() {
               const copy = Object.assign({}, book, {
@@ -2005,7 +2009,11 @@
 
       const currentBook = useMemo(function findCurrent() {
         if (!reader) return null;
-        const found = bookMap.get(reader.bookId);
+        let found = bookMap.get(reader.bookId);
+        if (!found) {
+          const custom = Array.isArray(state.customBooks) ? state.customBooks : [];
+          found = custom.find(function(b) { return b && b.id === reader.bookId; });
+        }
         if (!found) return null;
         if (Array.isArray(found.chapters) && found.chapters.length) return found;
         if (bookChaptersCache.has(found.id)) {
@@ -2015,7 +2023,7 @@
           }
         }
         return null;
-      }, [reader, bookMap, cacheTick]);
+      }, [reader, bookMap, state.customBooks, cacheTick]);
       const paletteShortcutLabel = /Mac|iPhone|iPad/i.test(
         (typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || '',
       ) ? '⌘K' : 'Ctrl K';

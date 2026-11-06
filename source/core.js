@@ -1327,7 +1327,9 @@
         source: 'local',
         format: (raw.format === 'epub' || raw.format === 'markdown' || raw.format === 'txt')
           ? raw.format
-          : (/\.md$/i.test(raw.title) ? 'markdown' : undefined),
+          : (isEpubBook(raw)
+              ? 'epub'
+              : (isMarkdownBook(raw) ? 'markdown' : undefined)),
         addedAt: Number.isFinite(raw.addedAt) ? raw.addedAt : Date.now(),
         coverImage: coverImage,
         chaptersInFs: bodyInFs || undefined,
@@ -2532,6 +2534,7 @@
       const list = Array.isArray(books) ? books : [];
       const keep = new Set();
       const liveIds = new Set();
+      const epubIds = new Set();
       list.forEach(function name(book) {
         if (!book || !book.id) return;
         // Every part a live book may have on disk: the readable text, the picture
@@ -2540,7 +2543,9 @@
         keep.add(fsAssetsDirName(book));
         keep.add(fsSourceFileName(book, 'epub'));
         keep.add(fsBookFileName(book.id));
-        liveIds.add(fsIdToken(book.id));
+        const token = fsIdToken(book.id);
+        liveIds.add(token);
+        if (isEpubBook(book)) epubIds.add(token);
       });
       return (Array.isArray(listedFiles) ? listedFiles : []).filter(function orphan(file) {
         if (typeof file !== 'string' || !file.length) return false;
@@ -2549,7 +2554,11 @@
         // title. They still carry the live id, and deleting them would delete the
         // only copy of that text — so the id, not the title, decides.
         const match = ORPHAN_NAME.exec(file);
-        if (match && liveIds.has(match[1])) return false;
+        if (match) {
+          const id = match[1];
+          if (epubIds.has(id) && /\.(txt|md)$/i.test(file)) return true;
+          if (liveIds.has(id)) return false;
+        }
         return true;
       });
     }

@@ -31,7 +31,7 @@ assert.match(read('icon.svg'), /<svg[\s>]/);
 let clientSource = read('client.js');
 const marker = '    return {\n      inject:';
 assert.ok(clientSource.includes(marker), 'plugin export marker is present');
-const exposed = '    globalThis.__test = { bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, parseMarkdownTable, parseMarkdownList, parseMarkdownCallout, renderInline, stripHtmlTags, injectHighlightIntoHtml, applyHtmlHighlights, saveState, unwrittenBookIds, parseEpubBook, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
+const exposed = '    globalThis.__test = { isEpubBook, isMarkdownBook, bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, parseMarkdownTable, parseMarkdownList, parseMarkdownCallout, renderInline, stripHtmlTags, injectHighlightIntoHtml, applyHtmlHighlights, saveState, unwrittenBookIds, parseEpubBook, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
 const instrumented = clientSource.replace(marker, exposed + marker);
 
 const registrations = [];
@@ -231,6 +231,21 @@ assert.equal(footnoteText, '1 注释内容。');
 assert.equal(T.fsBodyFileName({ id: 'md1', title: '文档', format: 'markdown' }), '文档--md1.md');
 assert.equal(T.fsBodyFileName({ id: 'txt1', title: '小说', format: 'txt' }), '小说--txt1.txt');
 assert.equal(T.fsBodyFileName({ id: 'ep1', title: '名著', format: 'epub' }), '名著--ep1.epub');
+
+// Verify isEpubBook and isMarkdownBook format detection
+assert.equal(T.isEpubBook({ format: 'epub' }), true);
+assert.equal(T.isEpubBook({ tags: ['EPUB'] }), true);
+assert.equal(T.isEpubBook({ subtitle: 'EPUB' }), true);
+assert.equal(T.isEpubBook({ title: 'novel.epub' }), true);
+assert.equal(T.isEpubBook({ format: 'txt' }), false);
+assert.equal(T.isEpubBook({ format: 'markdown' }), false);
+
+assert.equal(T.isMarkdownBook({ format: 'markdown' }), true);
+assert.equal(T.isMarkdownBook({ tags: ['Markdown'] }), true);
+assert.equal(T.isMarkdownBook({ subtitle: 'Markdown' }), true);
+assert.equal(T.isMarkdownBook({ title: 'notes.md' }), true);
+assert.equal(T.isMarkdownBook({ format: 'epub' }), false);
+assert.equal(T.isMarkdownBook({ format: 'txt' }), false);
 
 // Text decoding handles BOM-marked UTF-16 and UTF-8.
 const utf8Bytes = new TextEncoder().encode('第一章 海风');
@@ -1472,6 +1487,39 @@ assert.deepEqual(orphanRead[0].paragraphs, ['只有文字。', '![潮水](img-1-
 assert.equal(orphanRead[0].images, undefined, 'no picture, no fake data URL');
 assert.equal(await T.fsDeleteBookBody({ id: 'local-nosrc' }), true);
 assert.equal(await T.fsDeleteBookBody({ id: 'local-src' }), true);
+
+// Verify EPUB import stores ONLY .epub and NEVER writes .txt
+const sampleEpubBytes = new Uint8Array(readFileSync(new URL('tests/sample.epub', root)));
+const epubBookSample = {
+  id: 'local-epub-pure',
+  title: '海风集',
+  format: 'epub',
+  tags: ['EPUB', '本地导入'],
+  chapters: [{ id: 'ep-c1', title: '海风', paragraphs: ['海风从窗边吹进来。'] }],
+};
+assert.equal(T.fsRememberSource('local-epub-pure', '海风集.epub', sampleEpubBytes), true);
+assert.equal(await T.fsWriteNewBookBody(epubBookSample, { skipImages: true }), true);
+assert.ok(memory.files.has('books/海风集--local-epub-pure.epub'), 'only .epub source is stored');
+assert.equal(memory.files.has('books/海风集--local-epub-pure.txt'), false, 'no .txt file is written for epub import');
+
+// If a stale .txt file previously existed for this book, writing the body cleans it up
+memory.files.set('books/海风集--local-epub-pure.txt', 'stale txt content');
+assert.equal(T.fsRememberSource('local-epub-pure', '海风集.epub', sampleEpubBytes), true);
+assert.equal(await T.fsWriteBookBody(epubBookSample), true);
+assert.equal(memory.files.has('books/海风集--local-epub-pure.txt'), false, 'stale txt file is actively removed');
+assert.ok(memory.files.has('books/海风集--local-epub-pure.epub'), 'original .epub is kept');
+
+// Orphan cleanup also identifies leftover .txt files for EPUB books as orphans
+const epubOrphans = plain(T.orphanBodyIds(['海风集--local-epub-pure.txt', '海风集--local-epub-pure.epub'], [epubBookSample]));
+assert.deepEqual(epubOrphans, ['海风集--local-epub-pure.txt'], 'leftover txt for epub book is marked as orphan');
+
+// Reading back the EPUB parses native chapters directly without reading as text
+const rereadSampleEpub = plain(await T.fsReadBookBody(epubBookSample));
+assert.ok(Array.isArray(rereadSampleEpub) && rereadSampleEpub.length > 0);
+assert.equal(rereadSampleEpub[0].paragraphs[0], '海风从窗边吹进来。');
+
+assert.equal(await T.fsDeleteBookBody({ id: 'local-epub-pure' }), true);
+assert.equal(memory.files.has('books/海风集--local-epub-pure.epub'), false);
 
 // Deleting a book clears both shapes of its body; orphan cleanup works on names.
 assert.equal(await T.fsDeleteBookBody({ id: 'local-t' }), true);

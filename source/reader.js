@@ -210,13 +210,24 @@
         setSettingsOpen(false);
         if (mode !== 'start' && mode !== 'last') setChrome(true);
         const targetChapter = chapters[index];
-        let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
+        let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : mode === 'anchor' && percent ? { anchorId: String(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
         if (mode === 'resume') {
           target = chapterResumePercent(props.chapterMarks, targetChapter ? targetChapter.id : '');
         }
         if (index === chapterIndex) {
           if (target === 'last') setPage(Math.max(0, pageCount - 1));
           else if (mode === 'page' && typeof percent === 'number') setPage(clamp(Math.round(percent), 0, Math.max(0, pageCount - 1)));
+          else if (mode === 'anchor' && percent && columnsRef.current) {
+            let el = null;
+            try { el = columnsRef.current.querySelector('#' + CSS.escape(String(percent))); } catch (e) {}
+            if (el) {
+              const containerRect = columnsRef.current.getBoundingClientRect();
+              const elRect = el.getBoundingClientRect();
+              const stepSize = pageW + gap;
+              const actualLeft = (elRect.left - containerRect.left) + page * stepSize;
+              setPage(clamp(Math.floor(actualLeft / stepSize), 0, Math.max(0, pageCount - 1)));
+            }
+          }
           else if (typeof target === 'number' && target > 0) setPage(Math.round(clamp(target, 0, 1) * Math.max(0, pageCount - 1)));
           else if (mode !== 'resume' || typeof percent === 'number') setPage(0);
           return;
@@ -516,6 +527,16 @@
         if (pendingRef.current !== null) {
           if (pendingRef.current === 'last') target = nextCount - 1;
           else if (typeof pendingRef.current === 'object' && pendingRef.current && pendingRef.current.page !== undefined) target = clamp(pendingRef.current.page, 0, nextCount - 1);
+          else if (typeof pendingRef.current === 'object' && pendingRef.current && pendingRef.current.anchorId) {
+            let el = null;
+            try { el = element.querySelector('#' + CSS.escape(pendingRef.current.anchorId)); } catch (e) {}
+            if (el) {
+              const containerRect = element.getBoundingClientRect();
+              const elRect = el.getBoundingClientRect();
+              const actualLeft = elRect.left - containerRect.left;
+              target = clamp(Math.floor(actualLeft / stepSize), 0, nextCount - 1);
+            }
+          }
           else target = Math.round(clamp(Number(pendingRef.current) || 0, 0, 1) * Math.max(0, nextCount - 1));
           pendingRef.current = null;
         } else {
@@ -992,8 +1013,9 @@
         }
         const anchor = target && typeof target.closest === 'function' ? target.closest('a') : null;
         if (anchor) {
-          const href = anchor.getAttribute('href') || '';
+          let href = anchor.getAttribute('href') || '';
           if (!href) return;
+          try { href = decodeURIComponent(href); } catch (e) { /* ignore */ }
           if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
             event.preventDefault();
             try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (e) { /* ignore */ }
@@ -1014,6 +1036,7 @@
           const isNoteRef = /noteref|footnote|comment/i.test(epubType) ||
             /noteref|doc-noteref/i.test(role) ||
             /noteref|footnote/i.test(className) ||
+            /(^|[-_])(fn|footnote|note|comment)([-_0-9]|$)/i.test(targetId) ||
             Boolean(anchor.closest('sup')) ||
             /^[\[(]?[0-9*注†‡§#]+[\])]?$/.test(anchor.textContent.trim());
 
@@ -1056,7 +1079,7 @@
               }
             }
 
-            const isTargetFootnote = el && (el.tagName === 'ASIDE' || /footnote|noteref/i.test(el.getAttribute('epub:type') || '') || /footnote/i.test(el.className || ''));
+            const isTargetFootnote = el && (el.tagName === 'ASIDE' || /footnote|noteref/i.test(el.getAttribute('epub:type') || '') || /footnote/i.test(el.className || '') || /(^|[-_])(fn|footnote|note|comment)([-_0-9]|$)/i.test(el.id || ''));
             if (noteText && (isNoteRef || isTargetFootnote)) {
               const rect = anchor.getBoundingClientRect();
               const position = popoverPosition(rect, 170);
@@ -1082,10 +1105,14 @@
               el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
                    document.getElementById(targetId);
             } catch (e) { /* ignore */ }
-            if (el && stageRef.current) {
+            if (el && columnsRef.current) {
               dismissPopovers();
-              const offset = el.offsetLeft;
-              const targetPage = Math.floor(offset / (pageW + gap));
+              const containerRect = columnsRef.current.getBoundingClientRect();
+              const elRect = el.getBoundingClientRect();
+              const stepSize = pageW + gap;
+              const actualLeft = (elRect.left - containerRect.left) + page * stepSize;
+              const targetPage = Math.floor(actualLeft / stepSize);
+              setJumpReturn({ chapterIndex: chapterIndex, page: page });
               setPage(clamp(targetPage, 0, Math.max(0, pageCount - 1)));
               return;
             }
@@ -1095,11 +1122,14 @@
           let targetChapIdx = -1;
           if (targetPath) {
             const cleanPath = targetPath.toLowerCase().replace(/^[./]+/, '');
+            const targetFileName = cleanPath.split('/').pop();
             targetChapIdx = chapters.findIndex(function(c) {
               const cHref = String(c.href || '').toLowerCase().replace(/^[./]+/, '');
               const cPath = String(c.path || '').toLowerCase().replace(/^[./]+/, '');
+              const cFile = cHref.split('/').pop() || cPath.split('/').pop();
               return (cHref && (cHref === cleanPath || cHref.endsWith('/' + cleanPath))) ||
-                     (cPath && (cPath === cleanPath || cPath.endsWith('/' + cleanPath)));
+                     (cPath && (cPath === cleanPath || cPath.endsWith('/' + cleanPath))) ||
+                     (targetFileName && cFile === targetFileName);
             });
           }
           if (targetChapIdx < 0 && targetId) {
@@ -1111,7 +1141,12 @@
 
           if (targetChapIdx >= 0) {
             dismissPopovers();
-            goChapter(targetChapIdx, 'page', 0);
+            setJumpReturn({ chapterIndex: chapterIndex, page: page });
+            if (targetId) {
+              goChapter(targetChapIdx, 'anchor', targetId);
+            } else {
+              goChapter(targetChapIdx, 'page', 0);
+            }
             return;
           }
 
@@ -3329,7 +3364,13 @@
             top: footnote.y + 'px',
             transform: footnote.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
           },
-          onClick: function stop(e) { e.stopPropagation(); },
+          onClick: function onFootnoteClick(e) {
+            e.stopPropagation();
+            if (e.target && typeof e.target.closest === 'function' && e.target.closest('a')) {
+              e.preventDefault();
+              setFootnote(null);
+            }
+          },
         },
           h('div', { className: 'sr-footnote-head' },
             h('span', { className: 'sr-footnote-title' },

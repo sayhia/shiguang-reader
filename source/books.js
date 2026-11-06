@@ -81,3 +81,23 @@
         img.src = dataUrl;
       });
     }
+
+    function isEpubBook(book) {
+      if (!book) return false;
+      if (book.format === 'epub') return true;
+      if (book.format === 'txt' || book.format === 'markdown') return false;
+      if (book.subtitle === 'EPUB') return true;
+      if (Array.isArray(book.tags) && book.tags.indexOf('EPUB') >= 0) return true;
+      if (typeof book.title === 'string' && /\.epub$/i.test(book.title)) return true;
+      return false;
+    }
+
+    function isMarkdownBook(book) {
+      if (!book) return false;
+      if (book.format === 'markdown') return true;
+      if (book.format === 'txt' || book.format === 'epub') return false;
+      if (book.subtitle === 'Markdown') return true;
+      if (Array.isArray(book.tags) && (book.tags.indexOf('Markdown') >= 0 || book.tags.indexOf('MD') >= 0)) return true;
+      if (typeof book.title === 'string' && /\.(md|markdown)$/i.test(book.title)) return true;
+      return false;
+    }
