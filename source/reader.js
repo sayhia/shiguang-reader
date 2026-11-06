@@ -569,6 +569,14 @@
               setPageJumpOpen(true);
               return;
             }
+            if (plainKey === 'u' || event.key === 'Backspace') {
+              if (jumpReturn) {
+                event.preventDefault();
+                goChapter(jumpReturn.chapterIndex, 'page', jumpReturn.page);
+                setJumpReturn(null);
+                return;
+              }
+            }
             if (event.key === '-' || event.key === '_') { event.preventDefault(); changeFontSize(-1); return; }
             if (event.key === '=' || event.key === '+') { event.preventDefault(); changeFontSize(1); return; }
             if (event.key === '0') { event.preventDefault(); resetFontSize(); return; }
@@ -1941,6 +1949,7 @@
           { category: 'nav', label: t('prevChapter') + ' / ' + t('nextChapter'), keys: ['[', ']'] },
           { category: 'nav', label: t('shortcutPageJump'), keys: ['G'] },
           { category: 'nav', label: t('shortcutToc'), keys: ['T'] },
+          { category: 'nav', label: t('returnPreviousReadLabel'), keys: ['U', 'Backspace'] },
           { category: 'view', label: t('shortcutFont'), keys: ['-', '=', '0'] },
           { category: 'view', label: t('shortcutChrome'), keys: ['H'] },
           { category: 'view', label: t('shortcutFullscreen'), keys: ['F'] },
