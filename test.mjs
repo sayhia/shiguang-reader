@@ -230,6 +230,7 @@ assert.equal(footnoteText, '1 注释内容。');
 // Verify format preservation in fsBodyFileName
 assert.equal(T.fsBodyFileName({ id: 'md1', title: '文档', format: 'markdown' }), '文档--md1.md');
 assert.equal(T.fsBodyFileName({ id: 'txt1', title: '小说', format: 'txt' }), '小说--txt1.txt');
+assert.equal(T.fsBodyFileName({ id: 'ep1', title: '名著', format: 'epub' }), '名著--ep1.epub');
 
 // Text decoding handles BOM-marked UTF-16 and UTF-8.
 const utf8Bytes = new TextEncoder().encode('第一章 海风');

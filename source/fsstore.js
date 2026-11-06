@@ -184,6 +184,7 @@
     function fsBodyFileName(book) {
       const format = (book && book.format) || (book && /\.md$/i.test(book.title) ? 'markdown' : 'txt');
       if (format === 'markdown') return fsBookStem(book) + '.md';
+      if (format === 'epub') return fsBookStem(book) + '.epub';
       return fsBookStem(book) + '.txt';
     }
 
@@ -403,8 +404,12 @@
     async function fsWriteNewBookBody(book, options) {
       if (!book || !book.id) throw new Error('fs-no-book');
       const writePromise = (async function doWrite() {
-        const skipImages = Boolean(options && options.skipImages);
         const directory = await fsBooksDirectory(true);
+        if (book.format === 'epub') {
+          await fsWriteBookSource(directory, book);
+          return true;
+        }
+        const skipImages = Boolean(options && options.skipImages);
         const file = await directory.getFileHandle(fsBodyFileName(book), { create: true });
         const bodyWrite = (async function writeBody() {
           const writable = await fsOpenWritable(file);
@@ -432,6 +437,19 @@
       if (!book || !book.id) throw new Error('fs-no-book');
       const writePromise = (async function doWrite() {
         const directory = await fsBooksDirectory(true);
+        if (book.format === 'epub') {
+          await fsAdoptStaleSource(directory, book);
+          const wroteSource = await fsWriteBookSource(directory, book);
+          if (wroteSource) fsSourceImages.delete(book.id);
+          await fsRemoveEntry(directory, fsBookFileName(book.id));
+          const txtSuffix = fsBodySuffix(book.id);
+          for await (const entry of directory.values()) {
+            if (entry.kind === 'file' && entry.name.endsWith(txtSuffix)) {
+              await fsRemoveEntry(directory, entry.name, false);
+            }
+          }
+          return true;
+        }
         const name = fsBodyFileName(book);
         const file = await directory.getFileHandle(name, { create: true });
         const writable = await fsOpenWritable(file);
@@ -443,7 +461,6 @@
         await fsWriteChapterImages(directory, book);
         await fsAdoptStaleSource(directory, book);
         const wroteSource = await fsWriteBookSource(directory, book);
-        // New bytes for the original mean any pictures read out of the old one are stale.
         if (wroteSource) fsSourceImages.delete(book.id);
         // One copy of each part per book: drop the JSON written by older versions and
         // anything left under a previous title, so a rename never doubles the folder.

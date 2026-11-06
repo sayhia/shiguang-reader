@@ -36,7 +36,9 @@
     function Reader(props) {
       const t = props.t;
       const book = props.book || {};
-      const chapters = Array.isArray(book.chapters) ? book.chapters : [];
+      const chapters = Array.isArray(book.chapters) && book.chapters.length
+        ? book.chapters
+        : [{ id: 'empty-c1', title: book.title || '正文', paragraphs: [] }];
       const settings = props.settings || {};
       const initialIndex = clamp(Number(props.initialChapterIndex) || 0, 0, Math.max(0, chapters.length - 1));
       const initialPercent = clamp(Number(props.initialPercent) || 0, 0, 1);
@@ -991,50 +993,71 @@
         const anchor = target && typeof target.closest === 'function' ? target.closest('a') : null;
         if (anchor) {
           const href = anchor.getAttribute('href') || '';
+          if (!href) return;
+          if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
+            event.preventDefault();
+            try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (e) { /* ignore */ }
+            return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+
           const epubType = anchor.getAttribute('epub:type') || '';
           const role = anchor.getAttribute('role') || '';
           const className = anchor.className || '';
-          const isNoteRef = href.indexOf('#') >= 0 ||
-            /noteref|footnote|comment/i.test(epubType) ||
-            /noteref|doc-noteref/i.test(role) ||
-            /noteref|footnote/i.test(className);
+          const hashIdx = href.indexOf('#');
+          const targetPath = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+          const targetId = hashIdx >= 0 ? href.slice(hashIdx + 1) : '';
 
-          if (isNoteRef && href) {
-            event.preventDefault();
-            event.stopPropagation();
-            const targetId = href.indexOf('#') >= 0 ? href.split('#')[1] : '';
-            let noteHtml = '';
+          // 1. Is this a footnote?
+          const isNoteRef = /noteref|footnote|comment/i.test(epubType) ||
+            /noteref|doc-noteref/i.test(role) ||
+            /noteref|footnote/i.test(className) ||
+            Boolean(anchor.closest('sup')) ||
+            /^[\[(]?[0-9*注†‡§#]+[\])]?$/.test(anchor.textContent.trim());
+
+          if (targetId && (isNoteRef || !targetPath)) {
+            let el = null;
+            try {
+              el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
+                   document.getElementById(targetId);
+            } catch (e) { /* ignore */ }
+
             let noteText = '';
-            if (targetId) {
-              let el = null;
-              try {
-                el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
-                     document.getElementById(targetId);
-              } catch (e) { /* ignore */ }
-              if (el) {
-                const container = el.closest('p, div, aside, li') || el.parentElement || el;
-                noteHtml = container.innerHTML;
-                noteText = container.innerText || container.textContent || '';
-              } else {
-                const pattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
-                const para = chapter.paragraphs.find(function findP(p) { return pattern.test(p); });
-                if (para) {
-                  noteHtml = para;
-                  noteText = stripHtmlTags(para);
-                } else {
-                  for (let i = 0; i < (book.chapters || []).length; i += 1) {
-                    const c = book.chapters[i];
-                    const foundP = (c.paragraphs || []).find(function findInC(p) { return pattern.test(p); });
-                    if (foundP) {
-                      noteHtml = foundP;
-                      noteText = stripHtmlTags(foundP);
-                      break;
-                    }
+            let noteHtml = '';
+
+            if (el) {
+              const container = el.closest('aside, li, dd, p, div') || el.parentElement || el;
+              noteText = (container.innerText || container.textContent || '').trim();
+              noteHtml = container.innerHTML;
+            }
+
+            if (!noteText) {
+              // Search in current chapter or other chapters
+              const idPattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+              for (let i = 0; i < chapters.length; i += 1) {
+                const c = chapters[i];
+                const pList = c.paragraphs || [];
+                const foundIdx = pList.findIndex(function(p) { return idPattern.test(p); });
+                if (foundIdx >= 0) {
+                  let p = pList[foundIdx];
+                  let clean = stripHtmlTags(p).trim();
+                  if (!clean && pList[foundIdx + 1]) {
+                    p = pList[foundIdx + 1];
+                    clean = stripHtmlTags(p).trim();
+                  }
+                  if (clean) {
+                    noteText = clean;
+                    noteHtml = p;
+                    break;
                   }
                 }
               }
             }
-            if (noteHtml || noteText) {
+
+            const isTargetFootnote = el && (el.tagName === 'ASIDE' || /footnote|noteref/i.test(el.getAttribute('epub:type') || '') || /footnote/i.test(el.className || ''));
+            if (noteText && (isNoteRef || isTargetFootnote)) {
               const rect = anchor.getBoundingClientRect();
               const position = popoverPosition(rect, 170);
               dismissPopovers();
@@ -1050,11 +1073,48 @@
               return;
             }
           }
-          if (/^https?:\/\//i.test(href)) {
-            event.preventDefault();
-            try { window.open(href, '_blank', 'noopener,noreferrer'); } catch (e) { /* ignore */ }
+
+          // 2. If it's NOT a footnote, it is an internal jump link (章节跳转 / 锚点跳转)!
+          // 2a. In current chapter:
+          if (targetId && (!targetPath || targetPath === (chapter.href || '') || targetPath === (chapter.path || ''))) {
+            let el = null;
+            try {
+              el = (columnsRef.current && columnsRef.current.querySelector('#' + CSS.escape(targetId))) ||
+                   document.getElementById(targetId);
+            } catch (e) { /* ignore */ }
+            if (el && stageRef.current) {
+              dismissPopovers();
+              const offset = el.offsetLeft;
+              const targetPage = Math.floor(offset / (pageW + gap));
+              setPage(clamp(targetPage, 0, Math.max(0, pageCount - 1)));
+              return;
+            }
+          }
+
+          // 2b. In another chapter:
+          let targetChapIdx = -1;
+          if (targetPath) {
+            const cleanPath = targetPath.toLowerCase().replace(/^[./]+/, '');
+            targetChapIdx = chapters.findIndex(function(c) {
+              const cHref = String(c.href || '').toLowerCase().replace(/^[./]+/, '');
+              const cPath = String(c.path || '').toLowerCase().replace(/^[./]+/, '');
+              return (cHref && (cHref === cleanPath || cHref.endsWith('/' + cleanPath))) ||
+                     (cPath && (cPath === cleanPath || cPath.endsWith('/' + cleanPath)));
+            });
+          }
+          if (targetChapIdx < 0 && targetId) {
+            const idPattern = new RegExp('id=["\']' + targetId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '["\']', 'i');
+            targetChapIdx = chapters.findIndex(function(c) {
+              return (c.paragraphs || []).some(function(p) { return idPattern.test(p); });
+            });
+          }
+
+          if (targetChapIdx >= 0) {
+            dismissPopovers();
+            goChapter(targetChapIdx, 'page', 0);
             return;
           }
+
           return;
         }
         if (target && typeof target.closest === 'function' && target.closest('button')) return;
@@ -1540,10 +1600,17 @@
             if (trimmed.startsWith('<hr')) {
               return h('div', { key: index, 'data-p': index, className: 'sr-divider-wrap' }, h('hr', { className: 'sr-divider' }));
             }
+            const pIdMatch = trimmed.match(/^<p\b[^>]*\bid=["']([^"']+)["']/i);
+            const pClassMatch = trimmed.match(/^<p\b[^>]*\bclass=["']([^"']+)["']/i);
+            const pInnerHtml = /^<p\b[^>]*>/i.test(renderedHtml)
+              ? renderedHtml.replace(/^<p\b[^>]*>/i, '').replace(/<\/p>$/i, '')
+              : renderedHtml;
             return h('p', {
               key: index,
               'data-p': index,
-              dangerouslySetInnerHTML: { __html: renderedHtml }
+              id: pIdMatch ? pIdMatch[1] : undefined,
+              className: pClassMatch ? pClassMatch[1] : undefined,
+              dangerouslySetInnerHTML: { __html: pInnerHtml }
             });
           }
 

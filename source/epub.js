@@ -312,7 +312,7 @@
           const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
           if (idMatch) {
             const safeType = epubTypeMatch ? ' ' + epubTypeMatch[0] : '';
-            return '\n\n<span ' + idMatch[0] + safeType + '></span>';
+            return '\n\n<span ' + idMatch[0] + safeType + '></span> ';
           }
           return '\n\n';
         });
@@ -678,6 +678,8 @@
             title: navTitle || extracted.title || fallback,
             paragraphs: paragraphs,
             images: Object.keys(collected.images).length ? collected.images : undefined,
+            path: task.path,
+            href: task.item ? task.item.href : undefined,
           };
         } catch (error) {
           return null;

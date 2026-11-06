@@ -354,6 +354,9 @@
           try {
             await fsWriteBookBody(books[index]);
             done.push(books[index].id);
+            if (books[index] && books[index].id && Array.isArray(books[index].chapters) && books[index].chapters.length) {
+              setCachedChapters(books[index].id, books[index].chapters);
+            }
           } catch (error) {
             /* Leave the body in localStorage for this book rather than losing it. */
           }
@@ -453,6 +456,7 @@
         if (!book) return;
         const ready = await withBookBody(book);
         if (!ready || !Array.isArray(ready.chapters) || !ready.chapters.length) return;
+        setCachedChapters(ready.id, ready.chapters);
         book = ready;
         const saved = stateRef.current.progress[book.id];
         let targetChapter = chapterIndex;
@@ -530,15 +534,19 @@
         setState(function apply(previous) {
           const book = bookMap.get(bookId);
           if (!book) return previous;
+          const cached = bookChaptersCache.get(bookId);
+          const chapters = (Array.isArray(book.chapters) && book.chapters.length)
+            ? book.chapters
+            : (Array.isArray(cached) && cached.length ? cached : null);
           const existing = previous.progress[bookId];
-          const chapterCount = Math.max(1, book.chapters.length);
+          const chapterCount = Math.max(1, chapters ? chapters.length : ((book.chapterIds && book.chapterIds.length) || 1));
           const nextChapter = clamp(Number(chapterIndex) || 0, 0, chapterCount - 1);
           const nextPercent = clamp(Number(percent) || 0, 0, 1);
           if (existing && existing.chapterIndex === nextChapter && Math.abs((existing.percent || 0) - nextPercent) < 0.0001) {
             return previous;
           }
           const nextProgress = Object.assign({}, previous.progress);
-          const chapter = book.chapters[nextChapter];
+          const chapter = chapters ? chapters[nextChapter] : null;
           const existingMarks = existing && existing.chapterMarks ? existing.chapterMarks : {};
           nextProgress[bookId] = {
             chapterIndex: nextChapter,
@@ -2006,7 +2014,7 @@
             return Object.assign({}, found, { chapters: cached });
           }
         }
-        return found;
+        return null;
       }, [reader, bookMap, cacheTick]);
       const paletteShortcutLabel = /Mac|iPhone|iPad/i.test(
         (typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || '',
