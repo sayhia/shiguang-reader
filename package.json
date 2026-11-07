@@ -3,7 +3,7 @@
   "version": "1.140.0",
   "type": "module",
   "description": "拾光阅读：DeepSeek Harness 本地书架与沉浸式阅读插件。",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "sayhia",
   "exports": {
     ".": "./index.js",

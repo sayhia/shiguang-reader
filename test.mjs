@@ -21,7 +21,7 @@ const packageJson = JSON.parse(read('package.json'));
 const zhMeta = JSON.parse(read('locale/zh.json'));
 const enMeta = JSON.parse(read('locale/en.json'));
 assert.equal(packageJson.name, 'shiguang-reader');
-assert.equal(packageJson.license, 'MIT');
+assert.equal(packageJson.license, 'Apache-2.0');
 assert.ok(existsSync(new URL('LICENSE', root)));
 assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml');
 assert.equal(packageJson.dsh.client.platform, 'web');
