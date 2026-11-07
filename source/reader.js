@@ -54,6 +54,7 @@
       const [searchCursor, setSearchCursor] = useState(-1);
       const [searchScope, setSearchScope] = useState('book');
       const [settingsOpen, setSettingsOpen] = useState(false);
+      const [settingsTab, setSettingsTab] = useState('appearance');
       const [helpOpen, setHelpOpen] = useState(false);
       const [helpCategory, setHelpCategory] = useState('all');
       const [helpQuery, setHelpQuery] = useState('');
@@ -2437,123 +2438,138 @@
       }
 
       function settingsSheet() {
-        return h(React.Fragment, null,
-          h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
-          h('div', { className: 'sr-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
-            h('div', { className: 'sr-sheet-head' },
-              h('strong', null, t('readerSettings')),
-              h('div', { className: 'sr-sheet-head-actions' },
-                h('button', {
-                  type: 'button',
-                  className: 'sr-reader-icon',
-                  onClick: function help() { setSettingsOpen(false); setHelpOpen(true); },
-                  title: t('shortcuts'),
-                  'aria-label': t('shortcuts'),
-                }, h(Icon, { name: 'help', size: 16 })),
-                h('button', { type: 'button', className: 'sr-reader-icon', onClick: function close() { setSettingsOpen(false); }, title: t('close'), 'aria-label': t('close') },
-                  h(Icon, { name: 'close', size: 16 }),
-                ),
-              ),
+        const themeName = settings.theme === 'auto'
+          ? (t('themeAuto') + ' · ' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
+          : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1));
+        const settingsTabs = [
+          { id: 'appearance', label: t('settingsTabAppearance') },
+          { id: 'typography', label: t('settingsTabTypography') },
+          { id: 'reading', label: t('settingsTabReading') },
+        ];
+        function typeField(field) {
+          return h('div', {
+            key: field.id,
+            className: 'sr-type-field' + (field.full ? ' sr-type-field--full' : ''),
+          },
+            h('div', { className: 'sr-type-label' },
+              h('span', null, field.label),
+              field.value ? h('em', null, field.value) : null,
             ),
-            h('div', { className: 'sr-sheet-body' },
-              h('div', { className: 'sr-setting-col' },
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' },
-                t('theme'),
-                h('span', null, settings.theme === 'auto'
-                  ? (t('themeAuto') + ' · ' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
-                  : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
-              ),
-              h('div', { className: 'sr-theme-grid' },
-                READER_THEMES.map(function swatch(themeItem) {
-                  return h('button', {
-                    key: themeItem.id,
-                    type: 'button',
-                    className: 'sr-theme-swatch',
-                    'aria-pressed': settings.theme === themeItem.id,
-                    'aria-label': t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1)),
-                    style: { '--sw-bg': themeItem.bg, '--sw-ink': themeItem.ink },
-                    onClick: function pick() { applySettings({ theme: themeItem.id }); },
-                  },
-                    h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))),
-                    settings.theme === themeItem.id ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
-                  );
-                }),
-                h('button', {
-                  key: 'auto',
+            field.control,
+          );
+        }
+        function readingRow(row) {
+          return h('div', { key: row.id, className: 'sr-settings-row' },
+            h('div', { className: 'sr-settings-row-copy' },
+              h('strong', null, row.label),
+              h('p', null, row.hint),
+            ),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              className: 'sr-switch',
+              'aria-checked': row.checked,
+              'aria-label': row.label,
+              onClick: row.onToggle,
+            }, h('span', { className: 'sr-switch-thumb' })),
+          );
+        }
+        const appearancePanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('theme')),
+              h('em', null, themeName),
+            ),
+            h('div', { className: 'sr-settings-theme-grid' },
+              READER_THEMES.map(function swatch(themeItem) {
+                return h('button', {
+                  key: themeItem.id,
                   type: 'button',
-                  className: 'sr-theme-swatch sr-theme-swatch--auto',
-                  'aria-pressed': settings.theme === 'auto',
-                  'aria-label': t('themeAuto'),
-                  title: t('themeAuto'),
-                  style: { '--sw-bg': '#f3ede2', '--sw-ink': '#322920' },
-                  onClick: function pick() { applySettings({ theme: 'auto' }); },
+                  className: 'sr-theme-swatch',
+                  'aria-pressed': settings.theme === themeItem.id,
+                  'aria-label': t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1)),
+                  style: { '--sw-bg': themeItem.bg, '--sw-ink': themeItem.ink },
+                  onClick: function pick() { applySettings({ theme: themeItem.id }); },
                 },
-                  h('span', null, t('themeAuto')),
-                  settings.theme === 'auto' ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
-                ),
+                  h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))),
+                  settings.theme === themeItem.id ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
+                );
+              }),
+              h('button', {
+                key: 'auto',
+                type: 'button',
+                className: 'sr-theme-swatch sr-theme-swatch--auto',
+                'aria-pressed': settings.theme === 'auto',
+                'aria-label': t('themeAuto'),
+                title: t('themeAuto'),
+                style: { '--sw-bg': READER_THEMES[0].bg, '--sw-ink': READER_THEMES[0].ink },
+                onClick: function pick() { applySettings({ theme: 'auto' }); },
+              },
+                h('span', null, t('themeAuto')),
+                settings.theme === 'auto' ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('highlightColor')),
-              h('div', { className: 'sr-setting-color-row' },
-                HIGHLIGHT_COLORS.map(function colorDot(color) {
-                  return h('button', {
-                    key: color.id,
-                    type: 'button',
-                    className: 'sr-setting-color',
-                    style: { background: color.value },
-                    'aria-pressed': (settings.highlightColor || 'amber') === color.id,
-                    'aria-label': t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
-                    title: t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
-                    onClick: function pick() { applySettings({ highlightColor: color.id }); },
-                  });
-                }),
-              ),
+          ),
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('highlightColor')),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('fontSize'), h('span', null, settings.fontSize + 'px')),
-              h('div', { className: 'sr-font-row' },
-                h('div', { className: 'sr-font-sample' }, t('fontPreview')),
-                h('div', { className: 'sr-stepper' },
-                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('decreaseFont'), onClick: function smaller() { changeFontSize(-1); } }, h(Icon, { name: 'minus', size: 13 })),
-                  h('span', { className: 'sr-step-value' }, String(settings.fontSize)),
-                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('increaseFont'), onClick: function larger() { changeFontSize(1); } }, h(Icon, { name: 'plus', size: 13 })),
-                ),
-              ),
+            h('div', { className: 'sr-settings-color-row' },
+              HIGHLIGHT_COLORS.map(function colorDot(color) {
+                return h('button', {
+                  key: color.id,
+                  type: 'button',
+                  className: 'sr-setting-color',
+                  style: { background: color.value },
+                  'aria-pressed': (settings.highlightColor || 'amber') === color.id,
+                  'aria-label': t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
+                  title: t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
+                  onClick: function pick() { applySettings({ highlightColor: color.id }); },
+                });
+              }),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('lineHeight')),
-              h('div', { className: 'sr-font-row' },
-                h('div', { className: 'sr-font-sample', style: { fontSize: '12px', opacity: .7 } }, settings.lineHeight.toFixed(2)),
-                h('div', { className: 'sr-segment' },
-                  [{ value: 1.7, key: 'lineCompact' }, { value: 1.95, key: 'lineNormal' }, { value: 2.2, key: 'lineLoose' }].map(function option(item) {
-                    return h('button', {
-                      key: item.key,
-                      type: 'button',
-                      'aria-pressed': Math.abs(settings.lineHeight - item.value) < 0.01,
-                      onClick: function pick() { applySettings({ lineHeight: item.value }); },
-                    }, t(item.key));
-                  }),
-                ),
-              ),
-            ),
-              ),
-              h('div', { className: 'sr-setting-col' },
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('fontFamily')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+          ),
+        );
+        const typographyPanel = h('div', { className: 'sr-tab-page sr-type-page' },
+          h('div', { className: 'sr-type-grid' },
+            typeField({
+              id: 'font-family', full: true, label: t('fontFamily'),
+              control: h('div', { className: 'sr-segment sr-segment--wide' },
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'serif', onClick: function serif() { applySettings({ fontFamily: 'serif' }); }, style: { flex: 1 } }, t('fontSerif')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'sans', onClick: function sans() { applySettings({ fontFamily: 'sans' }); }, style: { flex: 1 } }, t('fontSans')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'kai', onClick: function kai() { applySettings({ fontFamily: 'kai' }); }, style: { flex: 1 } }, t('fontKai')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'dyslexic', onClick: function dyslexic() { applySettings({ fontFamily: 'dyslexic' }); }, style: { flex: 1 } }, t('fontDyslexic')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'system', onClick: function system() { applySettings({ fontFamily: 'system' }); }, style: { flex: 1 } }, t('fontSystem')),
               ),
-            ),
-            h('div', { className: 'sr-setting-pair' },
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('letterSpacing'), h('span', null, settings.letterSpacing.toFixed(2) + 'em')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'font-size', label: t('fontSize'), value: settings.fontSize + 'px',
+              control: h('div', { className: 'sr-type-size' },
+                h('span', { className: 'sr-type-glyph' }, t('fontPreview')),
+                h('div', { className: 'sr-stepper' },
+                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('decreaseFont'), onClick: function smaller() { changeFontSize(-1); } }, h(Icon, { name: 'minus', size: 13 })),
+                  h('span', { className: 'sr-step-value' }, String(settings.fontSize)),
+                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('increaseFont'), onClick: function larger() { changeFontSize(1); } }, h(Icon, { name: 'plus', size: 13 })),
+                ),
+              ),
+            }),
+            typeField({
+              id: 'line-height', label: t('lineHeight'), value: settings.lineHeight.toFixed(2),
+              control: h('div', { className: 'sr-segment' },
+                [{ value: 1.7, key: 'lineCompact' }, { value: 1.95, key: 'lineNormal' }, { value: 2.2, key: 'lineLoose' }].map(function option(item) {
+                  return h('button', {
+                    key: item.key,
+                    type: 'button',
+                    'aria-pressed': Math.abs(settings.lineHeight - item.value) < 0.01,
+                    onClick: function pick() { applySettings({ lineHeight: item.value }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
+              ),
+            }),
+            typeField({
+              id: 'letter-spacing', label: t('letterSpacing'), value: settings.letterSpacing.toFixed(2) + 'em',
+              control: h('div', { className: 'sr-segment' },
                 [{ value: 0.01, key: 'lineCompact' }, { value: 0.03, key: 'lineNormal' }, { value: 0.06, key: 'lineLoose' }].map(function option(item) {
                   return h('button', {
                     key: item.key,
@@ -2564,10 +2580,10 @@
                   }, t(item.key));
                 }),
               ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('paragraphSpacing'), h('span', null, settings.paragraphSpacing.toFixed(2) + 'em')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'paragraph-spacing', label: t('paragraphSpacing'), value: settings.paragraphSpacing.toFixed(2) + 'em',
+              control: h('div', { className: 'sr-segment' },
                 [{ value: 0.65, key: 'lineCompact' }, { value: 0.9, key: 'lineNormal' }, { value: 1.25, key: 'lineLoose' }].map(function option(item) {
                   return h('button', {
                     key: item.key,
@@ -2578,12 +2594,10 @@
                   }, t(item.key));
                 }),
               ),
-            ),
-            ),
-            h('div', { className: 'sr-setting-pair' },
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('pageWidth')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'page-width', label: t('pageWidth'),
+              control: h('div', { className: 'sr-segment' },
                 [{ value: 'compact', key: 'lineCompact' }, { value: 'comfortable', key: 'lineNormal' }, { value: 'wide', key: 'lineLoose' }].map(function option(item) {
                   return h('button', {
                     key: item.value,
@@ -2594,10 +2608,10 @@
                   }, t(item.key));
                 }),
               ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('textAlign')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'text-align', label: t('textAlign'),
+              control: h('div', { className: 'sr-segment' },
                 h('button', {
                   type: 'button',
                   'aria-pressed': (settings.textAlign || 'justify') === 'justify',
@@ -2611,81 +2625,109 @@
                   style: { flex: 1 },
                 }, t('alignLeft')),
               ),
+            }),
+          ),
+        );
+        const readingPanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-list' },
+            readingRow({
+              id: 'auto-hide', label: t('autoHideChrome'), hint: t('autoHideChromeHint'),
+              checked: settings.autoHideChrome,
+              onToggle: function toggle() { applySettings({ autoHideChrome: !settings.autoHideChrome }); },
+            }),
+            readingRow({
+              id: 'paper-sound', label: t('paperSound'), hint: t('paperSoundHint'),
+              checked: settings.paperSound === true,
+              onToggle: function toggleSound() { applySettings({ paperSound: !settings.paperSound }); },
+            }),
+            readingRow({
+              id: 'reading-ruler', label: t('readingRuler'), hint: t('readingRulerHint'),
+              checked: Boolean(settings.readingRuler || rulerOpen),
+              onToggle: function toggleRuler() {
+                const next = !(settings.readingRuler || rulerOpen);
+                setRulerOpen(next);
+                applySettings({ readingRuler: next });
+                props.showToast(next ? t('rulerOn') : t('rulerOff'));
+              },
+            }),
+          ),
+          h('div', { className: 'sr-settings-section sr-settings-voice' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('speechVoice')),
             ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('autoHideChrome')),
-                  h('p', { className: 'sr-setting-hint' }, t('autoHideChromeHint')),
-                ),
+            voices.length
+              ? h('select', {
+                className: 'sr-setting-select',
+                value: settings.speechVoice || '',
+                'aria-label': t('speechVoice'),
+                onChange: function change(event) { applySettings({ speechVoice: event.target.value }); },
+              },
+                h('option', { value: '' }, t('systemVoiceDefault')),
+                voices.map(function voice(item) {
+                  return h('option', { key: item.voiceURI || item.name, value: item.voiceURI || item.name },
+                    item.name + ' · ' + item.lang,
+                  );
+                }),
+              )
+              : h('p', { className: 'sr-settings-hint' }, t('noVoices')),
+          ),
+        );
+        const panel = settingsTab === 'typography'
+          ? typographyPanel
+          : settingsTab === 'reading'
+            ? readingPanel
+            : appearancePanel;
+        return h(React.Fragment, null,
+          h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
+          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
+            h('div', { className: 'sr-settings-head' },
+              h('div', { className: 'sr-settings-heading' },
+                h('span', { className: 'sr-settings-kicker' }, t('settingsKicker')),
+                h('strong', null, t('readerSettings')),
+              ),
+              h('div', { className: 'sr-settings-head-actions' },
                 h('button', {
                   type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': settings.autoHideChrome,
-                  'aria-label': t('autoHideChrome'),
-                  onClick: function toggle() { applySettings({ autoHideChrome: !settings.autoHideChrome }); },
-                }, h('span', { className: 'sr-switch-thumb' })),
+                  className: 'sr-reader-icon',
+                  onClick: function help() { setSettingsOpen(false); setHelpOpen(true); },
+                  title: t('shortcuts'),
+                  'aria-label': t('shortcuts'),
+                }, h(Icon, { name: 'help', size: 16 })),
+                h('button', { type: 'button', className: 'sr-reader-icon', onClick: function close() { setSettingsOpen(false); }, title: t('close'), 'aria-label': t('close') },
+                  h(Icon, { name: 'close', size: 16 }),
+                ),
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('paperSound')),
-                  h('p', { className: 'sr-setting-hint' }, t('paperSoundHint')),
-                ),
-                h('button', {
+            h('div', { className: 'sr-settings-tabs', role: 'tablist', 'aria-label': t('readerSettings') },
+              settingsTabs.map(function tab(item, index) {
+                return h('button', {
+                  key: item.id,
                   type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': settings.paperSound === true,
-                  'aria-label': t('paperSound'),
-                  onClick: function toggleSound() { applySettings({ paperSound: !settings.paperSound }); },
-                }, h('span', { className: 'sr-switch-thumb' })),
-              ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('readingRuler')),
-                  h('p', { className: 'sr-setting-hint' }, t('readingRulerHint')),
-                ),
-                h('button', {
-                  type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': Boolean(settings.readingRuler || rulerOpen),
-                  'aria-label': t('readingRuler'),
-                  onClick: function toggleRuler() {
-                    const next = !(settings.readingRuler || rulerOpen);
-                    setRulerOpen(next);
-                    applySettings({ readingRuler: next });
-                    props.showToast(next ? t('rulerOn') : t('rulerOff'));
+                  role: 'tab',
+                  id: 'sr-settings-tab-' + item.id,
+                  className: 'sr-settings-tab',
+                  'aria-selected': settingsTab === item.id ? 'true' : 'false',
+                  'aria-controls': 'sr-settings-panel',
+                  tabIndex: settingsTab === item.id ? 0 : -1,
+                  onClick: function select() { setSettingsTab(item.id); },
+                  onKeyDown: function keys(event) {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    event.preventDefault();
+                    const delta = event.key === 'ArrowRight' ? 1 : -1;
+                    const nextIndex = (index + delta + settingsTabs.length) % settingsTabs.length;
+                    setSettingsTab(settingsTabs[nextIndex].id);
+                    const parent = event.currentTarget.parentElement;
+                    if (parent && parent.children[nextIndex]) parent.children[nextIndex].focus();
                   },
-                }, h('span', { className: 'sr-switch-thumb' })),
-              ),
+                }, item.label);
+              }),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('speechVoice')),
-              voices.length
-                ? h('select', {
-                  className: 'sr-setting-select',
-                  value: settings.speechVoice || '',
-                  'aria-label': t('speechVoice'),
-                  onChange: function change(event) { applySettings({ speechVoice: event.target.value }); },
-                },
-                  h('option', { value: '' }, t('systemVoiceDefault')),
-                  voices.map(function voice(item) {
-                    return h('option', { key: item.voiceURI || item.name, value: item.voiceURI || item.name },
-                      item.name + ' · ' + item.lang,
-                    );
-                  }),
-                )
-                : h('p', { className: 'sr-setting-hint' }, t('noVoices')),
-            ),
-              ),
-            ),
+            h('div', {
+              className: 'sr-settings-panel',
+              id: 'sr-settings-panel',
+              role: 'tabpanel',
+              'aria-labelledby': 'sr-settings-tab-' + settingsTab,
+            }, panel),
             h('div', { className: 'sr-sheet-foot' },
               h('button', {
                 type: 'button',
