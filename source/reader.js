@@ -134,6 +134,7 @@
       const suppressTimerRef = useRef(null);
       const readyRef = useRef(false);
       const pointerRef = useRef(null);
+      const touchStartYRef = useRef(0);
       const noteRef = useRef(null);
       const searchRef = useRef(null);
       const ttsRef = useRef({ active: false, paused: false, chunks: [], offsets: [], index: 0, chapterIndex: 0, lang: 'zh-CN', rate: 1, utterance: null });
@@ -157,10 +158,12 @@
       const chapterBookmarks = useMemo(function chapterBookmarksMemo() {
         return bookmarksForBook.filter(function inChapter(item) { return item.chapterIndex === chapterIndex; }).slice(0, 5);
       }, [bookmarksForBook, chapterIndex]);
+      const dockedRail = settings.sideRail === true && Boolean(drawer) && typeof window !== 'undefined' && window.innerWidth >= 1100;
       const bookHighlights = useMemo(function bookHighlightsMemo() {
         return props.highlights.filter(function match(item) { return item.bookId === book.id; });
       }, [props.highlights, book.id]);
       const layout = settings.layout || 'page';
+      const bookImageLayout = (settings.imageLayouts && settings.imageLayouts[book.id]) || settings.imageLayout || 'inline';
       const scrollMode = layout === 'scroll';
       const essay = layout === 'essay' && box.w >= 900;
       const spread = (layout === 'spread' && box.w >= 980) || essay;
@@ -1186,6 +1189,21 @@
         try { selection.removeAllRanges(); } catch (error) { /* ignore */ }
       }
 
+      function handleRootTouchStart(event) {
+        if (!event.touches || !event.touches[0]) return;
+        touchStartYRef.current = event.touches[0].clientY;
+      }
+
+      function handleRootTouchEnd() {
+        if (!(settings.immersive || settings.autoHideChrome)) return;
+        if (drawer || settingsOpen || noteDraft) return;
+        const element = readerRef.current;
+        if (!element) return;
+        const rect = element.getBoundingClientRect();
+        const y = touchStartYRef.current - rect.top;
+        if (y < 64 || y > rect.height - 64) setChrome(true);
+      }
+
       function handleStageClick(event) {
         if (suppressClickRef.current) {
           suppressClickRef.current = false;
@@ -2192,8 +2210,8 @@
           });
 
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer ' + (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right'), role: 'dialog', 'aria-modal': 'true', 'aria-label': t('bookNotes') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer ' + (dockedRail ? 'sr-drawer--docked' : (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right')), role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('bookNotes') },
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.author),
@@ -2350,8 +2368,8 @@
         });
         const readCount = overview.filter(function read(item) { return item.read; }).length;
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerToc') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer' + (dockedRail ? ' sr-drawer--docked' : ''), role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('readerToc') },
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.author),
@@ -2446,8 +2464,8 @@
         const isChapter = searchScope === 'chapter';
         const results = searchResult.results;
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer ' + (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right') + ' sr-drawer--search', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('searchInBook') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer ' + (dockedRail ? 'sr-drawer--docked' : (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right')) + ' sr-drawer--search', role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('searchInBook') },
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.title),
@@ -2690,7 +2708,12 @@
         };
         function applyPreset(name) {
           const next = presetSettings[name];
-          if (next) applySettings(next);
+          if (next) {
+            const imageLayout = next.imageLayout || 'inline';
+            applySettings(Object.assign({}, next, {
+              imageLayouts: Object.assign({}, settings.imageLayouts || {}, { [book.id]: imageLayout }),
+            }));
+          }
         }
         function resetCurrentTab() {
           if (settingsTab === 'appearance') {
@@ -2939,8 +2962,13 @@
                   return h('button', {
                     key: item.value,
                     type: 'button',
-                    'aria-pressed': (settings.imageLayout || 'inline') === item.value,
-                    onClick: function pick() { applySettings({ imageLayout: item.value }); },
+                    'aria-pressed': bookImageLayout === item.value,
+                    onClick: function pick() {
+                      applySettings({
+                        imageLayout: item.value,
+                        imageLayouts: Object.assign({}, settings.imageLayouts || {}, { [book.id]: item.value }),
+                      });
+                    },
                     style: { flex: 1 },
                   }, t(item.key));
                 }),
@@ -3483,15 +3511,18 @@
         'data-theme': activeThemeId,
         'data-page-width': settings.pageWidth,
         'data-layout': settings.layout || 'page',
-        'data-image-layout': settings.imageLayout || 'inline',
+        'data-image-layout': bookImageLayout,
         'data-writing-mode': settings.writingMode === 'vertical' ? 'vertical' : 'horizontal',
         'data-margin-notes': settings.marginNotes === true ? 'true' : 'false',
         'data-chapter-rail': settings.chapterRail === true ? 'true' : 'false',
         'data-thumb-dock': settings.thumbDock === true ? 'true' : 'false',
+        'data-rail-open': dockedRail ? 'true' : 'false',
         'data-minimal-dock': settings.minimalDock !== false ? 'true' : 'false',
         'data-tts': tts.status === 'idle' ? 'false' : 'true',
         ref: readerRef,
         tabIndex: -1,
+        onTouchStart: handleRootTouchStart,
+        onTouchEnd: handleRootTouchEnd,
       },
         h('div', {
           className: 'sr-sr-only',

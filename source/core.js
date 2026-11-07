@@ -1063,6 +1063,7 @@
           chapterRail: false,
           bookCover: true,
           imageLayout: 'inline',
+          imageLayouts: {},
           writingMode: 'horizontal',
           thumbDock: false,
           edgeTap: true,
@@ -1120,6 +1121,15 @@
         chapterRail: value.chapterRail === true,
         bookCover: value.bookCover !== false,
         imageLayout: ['inline', 'wide', 'margin'].indexOf(value.imageLayout) >= 0 ? value.imageLayout : 'inline',
+        imageLayouts: (function normalizeImageLayouts() {
+          const source = value.imageLayouts && typeof value.imageLayouts === 'object' && !Array.isArray(value.imageLayouts) ? value.imageLayouts : {};
+          const out = {};
+          Object.keys(source).slice(0, 200).forEach(function each(id) {
+            if (typeof id !== 'string' || !id || id.length > 200) return;
+            if (['inline', 'wide', 'margin'].indexOf(source[id]) >= 0) out[id] = source[id];
+          });
+          return out;
+        })(),
         writingMode: value.writingMode === 'vertical' ? 'vertical' : 'horizontal',
         thumbDock: value.thumbDock === true,
         edgeTap: value.edgeTap !== false,

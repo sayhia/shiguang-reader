@@ -334,7 +334,7 @@ assert.deepEqual(plain(normalized.settings), {
   letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false,
   immersive: false, layout: 'page', chapterOpener: true, edgeMeta: true, focusMode: false, sideRail: false, minimalDock: true,
   marginNotes: false, marginFootnotes: false, chapterRail: false, bookCover: true,
-  imageLayout: 'inline', writingMode: 'horizontal', thumbDock: false, edgeTap: true, preset: 'classic',
+  imageLayout: 'inline', imageLayouts: {}, writingMode: 'horizontal', thumbDock: false, edgeTap: true, preset: 'classic',
   paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
   textAlign: 'justify', readingRuler: false,
 });
@@ -360,6 +360,9 @@ assert.equal(customLayout2.settings.marginFootnotes, true);
 assert.equal(customLayout2.settings.chapterRail, true);
 assert.equal(customLayout2.settings.bookCover, false);
 assert.equal(customLayout2.settings.imageLayout, 'margin');
+assert.deepEqual(plain(customLayout2.settings.imageLayouts), {});
+const customBookImage = T.normalizeState({ settings: { imageLayouts: { 'local-rjc': 'wide', bad: 'nope' } } });
+assert.deepEqual(plain(customBookImage.settings.imageLayouts), { 'local-rjc': 'wide' });
 assert.equal(customLayout2.settings.writingMode, 'vertical');
 assert.equal(customLayout2.settings.thumbDock, true);
 assert.equal(customLayout2.settings.edgeTap, false);
