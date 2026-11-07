@@ -9,7 +9,7 @@
     ];
 
     const READER_THEMES = [
-      { id: 'paper', bg: '#f3ede2', panel: '#faf5eb', ink: '#322920', muted: '#6e5f4d', line: 'rgba(94,73,48,0.16)', accent: '#9c6a36', wash: 'rgba(156,106,54,0.14)' },
+      { id: 'paper', bg: '#f7f5ef', panel: '#ffffff', ink: '#1d2a23', muted: '#6d7a72', line: 'rgba(31,58,47,0.12)', accent: '#1f4d3d', wash: 'rgba(31,77,61,0.09)' },
       { id: 'candle', bg: '#f4e6ce', panel: '#faeedc', ink: '#2e1d0f', muted: '#725439', line: 'rgba(90,56,22,0.14)', accent: '#ad6b2a', wash: 'rgba(173,107,42,0.14)' },
       { id: 'snow', bg: '#f8f7f4', panel: '#ffffff', ink: '#292825', muted: '#6c6860', line: 'rgba(62,60,54,0.11)', accent: '#467268', wash: 'rgba(70,114,104,0.1)' },
       { id: 'mint', bg: '#e6eee4', panel: '#f1f6ef', ink: '#273428', muted: '#586856', line: 'rgba(50,72,52,0.13)', accent: '#4a744b', wash: 'rgba(74,116,75,0.12)' },
