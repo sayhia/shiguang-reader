@@ -46,6 +46,8 @@
       const [chapterIndex, setChapterIndex] = useState(initialIndex);
       const [page, setPage] = useState(0);
       const [pageCount, setPageCount] = useState(1);
+      const [totalPages, setTotalPages] = useState(1);
+      const [scrollRatio, setScrollRatio] = useState(0);
       const [chrome, setChrome] = useState(true);
       const [drawer, setDrawer] = useState(null);
       const [notesTab, setNotesTab] = useState('highlights');
@@ -150,11 +152,15 @@
       const bookHighlights = useMemo(function bookHighlightsMemo() {
         return props.highlights.filter(function match(item) { return item.bookId === book.id; });
       }, [props.highlights, book.id]);
+      const layout = settings.layout || 'page';
+      const scrollMode = layout === 'scroll';
+      const spread = layout === 'spread' && box.w >= 980;
       const gap = box.w && box.w < 700 ? 34 : 56;
-      const pageW = box.w;
+      const pageW = spread ? Math.max(120, Math.floor((box.w - gap) / 2)) : box.w;
       const pageH = box.h;
       const step = pageW + gap;
-      const progressPercentValue = pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1);
+      const viewStep = spread ? step * 2 : step;
+      const progressPercentValue = scrollMode ? scrollRatio : (pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1));
       const remainingMinutes = remainingReadingMinutes(chapterString, progressPercentValue);
       const remainingLabel = remainingMinutes ? fill(t('remainingMinutes'), { n: remainingMinutes }) : t('chapterAlmostDone');
       const overallBookPct = clamp(Math.round(((chapterIndex + progressPercentValue) / Math.max(1, chapters.length)) * 100), 0, 100);
@@ -162,7 +168,13 @@
         return item.chapterIndex === chapterIndex && Math.abs(item.percent - progressPercentValue) < 0.035;
       });
       const peekHighlight = peek ? props.highlights.find(function find(item) { return item.id === peek.id; }) : null;
-      const pageLabel = fill(t('pageOf'), { n: Math.min(page + 1, pageCount), m: pageCount });
+      const pageStart = spread ? page * 2 + 1 : page + 1;
+      const pageEnd = spread ? Math.min(pageStart + 1, totalPages) : pageStart;
+      const pageLabel = scrollMode
+        ? Math.round(scrollRatio * 100) + '%'
+        : spread
+          ? (pageStart === pageEnd ? String(pageStart) : pageStart + '–' + pageEnd) + ' / ' + Math.max(1, totalPages)
+          : fill(t('pageOf'), { n: Math.min(page + 1, pageCount), m: pageCount });
       const searchResultAll = useMemo(function searchAllMemo() {
         return searchBookChapters(chapters, searchText, 80);
       }, [chapters, searchText]);
@@ -232,7 +244,8 @@
               const elRect = el.getBoundingClientRect();
               const stepSize = pageW + gap;
               const actualLeft = (elRect.left - containerRect.left) + page * stepSize;
-              setPage(clamp(Math.floor(actualLeft / stepSize), 0, Math.max(0, pageCount - 1)));
+              const column = Math.floor(actualLeft / stepSize);
+              setPage(clamp(spread ? Math.floor(column / 2) : column, 0, Math.max(0, pageCount - 1)));
             }
           }
           else if (typeof target === 'number' && target > 0) setPage(Math.round(clamp(target, 0, 1) * Math.max(0, pageCount - 1)));
@@ -245,7 +258,7 @@
         setAnimate(false);
         setPage(0);
         setChapterIndex(index);
-      }, [chapterIndex, chapters, pageCount, dismissPopovers, props.chapterMarks, showChapterHud]);
+      }, [chapterIndex, chapters, pageCount, dismissPopovers, props.chapterMarks, showChapterHud, spread]);
 
       const audioCtxRef = useRef(null);
       const playPaperSound = useCallback(function playSound() {
@@ -280,6 +293,24 @@
       }, [settings.paperSound]);
 
       const nextPage = useCallback(function next() {
+        if (scrollMode) {
+          dismissPopovers();
+          const element = columnsRef.current;
+          if (!element) return;
+          const remaining = element.scrollHeight - element.clientHeight - element.scrollTop;
+          if (remaining > 8) {
+            element.scrollBy({ top: Math.max(160, element.clientHeight * 0.82), behavior: 'smooth' });
+            return;
+          }
+          if (chapterIndex < chapters.length - 1) {
+            playPaperSound();
+            goChapter(chapterIndex + 1, 'start');
+            return;
+          }
+          props.onFinish(book.id);
+          props.showToast(t('readerFinished'));
+          return;
+        }
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page < pageCount - 1) {
@@ -294,9 +325,25 @@
         }
         props.onFinish(book.id);
         props.showToast(t('readerFinished'));
-      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t]);
+      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t, scrollMode]);
 
       const prevPage = useCallback(function previous() {
+        if (scrollMode) {
+          dismissPopovers();
+          const element = columnsRef.current;
+          if (!element) return;
+          if (element.scrollTop > 8) {
+            element.scrollBy({ top: -Math.max(160, element.clientHeight * 0.82), behavior: 'smooth' });
+            return;
+          }
+          if (chapterIndex > 0) {
+            playPaperSound();
+            goChapter(chapterIndex - 1, 'last');
+            return;
+          }
+          props.showToast(t('firstPage'));
+          return;
+        }
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page > 0) {
@@ -310,7 +357,7 @@
           return;
         }
         props.showToast(t('firstPage'));
-      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t]);
+      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t, scrollMode]);
 
       const applySettings = useCallback(function update(patch) {
         if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
@@ -459,6 +506,7 @@
       }, []);
 
       useEffect(function bindWheelSwipe() {
+        if (scrollMode) return undefined;
         const element = stageRef.current;
         if (!element || typeof element.addEventListener !== 'function') return undefined;
         let deltaAccum = 0;
@@ -486,7 +534,7 @@
         return function unbind() {
           element.removeEventListener('wheel', onWheel);
         };
-      }, [nextPage, prevPage]);
+      }, [nextPage, prevPage, scrollMode]);
 
       useEffect(function watchSystemTheme() {
         if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -517,6 +565,12 @@
       }, [animate, chapterIndex]);
 
       useLayoutEffect(function paginate() {
+        if (scrollMode) {
+          setPageCount(1);
+          setTotalPages(1);
+          readyRef.current = true;
+          return undefined;
+        }
         const element = columnsRef.current;
         if (!element || !pageW || !pageH) return;
         const stepSize = pageW + gap;
@@ -528,7 +582,9 @@
           const endColumn = Math.round((endRect.left - containerRect.left) / stepSize) + 1;
           measuredCount = Math.max(measuredCount, endColumn);
         }
-        const nextCount = Math.max(1, measuredCount);
+        const totalColumns = Math.max(1, measuredCount);
+        const nextCount = Math.max(1, spread ? Math.ceil(totalColumns / 2) : totalColumns);
+        setTotalPages(totalColumns);
         setPageCount(nextCount);
         let target = pageRef.current;
         if (pendingRef.current !== null) {
@@ -547,7 +603,8 @@
               const containerRect = element.getBoundingClientRect();
               const elRect = el.getBoundingClientRect();
               const actualLeft = (elRect.left - containerRect.left) + pageRef.current * stepSize;
-              target = clamp(Math.floor(actualLeft / stepSize), 0, nextCount - 1);
+              const column = Math.floor(actualLeft / stepSize);
+              target = clamp(spread ? Math.floor(column / 2) : column, 0, nextCount - 1);
             }
           }
           else target = Math.round(clamp(Number(pendingRef.current) || 0, 0, 1) * Math.max(0, nextCount - 1));
@@ -562,13 +619,39 @@
           setProgressTick(function bump(value) { return value + 1; });
         });
         return function cleanup() { window.cancelAnimationFrame(frame); };
-      }, [book.id, chapter.id, chapterIndex, pageW, pageH, gap, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, fontTick, chapterHighlights.length]);
+      }, [book.id, chapter.id, chapterIndex, pageW, pageH, gap, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, fontTick, chapterHighlights.length, spread, scrollMode]);
 
       useEffect(function reportProgress() {
         if (!readyRef.current) return;
-        const percent = pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1);
+        const percent = scrollMode ? scrollRatio : (pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1));
         props.onProgress(book.id, chapterIndex, percent);
-      }, [book.id, chapterIndex, page, pageCount, progressTick, props.onProgress]);
+      }, [book.id, chapterIndex, page, pageCount, progressTick, props.onProgress, scrollMode, scrollRatio]);
+
+      useEffect(function alignScrollChapter() {
+        if (!scrollMode) return undefined;
+        const element = columnsRef.current;
+        if (!element) return undefined;
+        let target = pendingRef.current;
+        if (target === null || target === undefined) {
+          target = chapterIndex === initialIndex
+            ? (currentPercentRef.current || initialPercent)
+            : 0;
+        }
+        let ratio = 0;
+        if (target === 'last') ratio = 1;
+        else if (typeof target === 'number') ratio = clamp(target, 0, 1);
+        else if (target && typeof target === 'object' && typeof target.percent === 'number') ratio = clamp(target.percent, 0, 1);
+        else if (target && typeof target === 'object' && target.page !== undefined && pageCount > 1) ratio = clamp(target.page / (pageCount - 1), 0, 1);
+        pendingRef.current = null;
+        const frame = window.requestAnimationFrame(function scrollTo() {
+          const max = Math.max(0, element.scrollHeight - element.clientHeight);
+          element.scrollTop = ratio * max;
+          setScrollRatio(ratio);
+          currentPercentRef.current = ratio;
+          readyRef.current = true;
+        });
+        return function cleanup() { window.cancelAnimationFrame(frame); };
+      }, [scrollMode, chapterIndex, initialIndex, initialPercent, pageCount, layout, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, settings.chapterOpener, fontTick]);
 
       const addSecondsRef = useRef(props.onAddSeconds);
       addSecondsRef.current = props.onAddSeconds;
@@ -898,13 +981,54 @@
       }, [chapterIndex]);
 
       useEffect(function autoHideControls() {
-        if (!settings.autoHideChrome || !chrome) return undefined;
+        if (!(settings.autoHideChrome || settings.immersive) || !chrome) return undefined;
         if (drawer || settingsOpen || noteDraft || toolbar || peek) return undefined;
         const timer = window.setTimeout(function hideControls() {
           setChrome(false);
         }, 6000);
         return function cleanup() { window.clearTimeout(timer); };
       }, [settings.autoHideChrome, chrome, drawer, settingsOpen, noteDraft, toolbar, peek, page, chapterIndex]);
+
+      useEffect(function applyImmersiveDefault() {
+        if (settings.immersive) setChrome(false);
+        else if (!settings.autoHideChrome) setChrome(true);
+      }, [settings.immersive, settings.autoHideChrome]);
+
+      useEffect(function revealChromeAtEdges() {
+        if (!(settings.immersive || settings.autoHideChrome)) return undefined;
+        const element = readerRef.current;
+        if (!element || typeof element.addEventListener !== 'function') return undefined;
+        let hideTimer = null;
+        function scheduleHide() {
+          if (hideTimer) window.clearTimeout(hideTimer);
+          hideTimer = window.setTimeout(function hide() {
+            hideTimer = null;
+            if (!drawer && !settingsOpen && !noteDraft && !toolbar && !peek) setChrome(false);
+          }, 2800);
+        }
+        function onMove(event) {
+          const rect = element.getBoundingClientRect();
+          const y = event.clientY - rect.top;
+          if (y < 56 || y > rect.height - 56) {
+            setChrome(true);
+            scheduleHide();
+          }
+        }
+        function onLeave() {
+          if (!drawer && !settingsOpen && !noteDraft && !toolbar && !peek) setChrome(false);
+        }
+        element.addEventListener('pointermove', onMove);
+        element.addEventListener('pointerleave', onLeave);
+        return function cleanup() {
+          if (hideTimer) window.clearTimeout(hideTimer);
+          element.removeEventListener('pointermove', onMove);
+          element.removeEventListener('pointerleave', onLeave);
+        };
+      }, [settings.immersive, settings.autoHideChrome, drawer, settingsOpen, noteDraft, toolbar, peek]);
+
+      useEffect(function centerFocusBand() {
+        if (settings.focusMode && box.h) setRulerY(Math.round(box.h * 0.45));
+      }, [settings.focusMode, box.h]);
 
       useEffect(function eyeCareTimer() {
         const timer = setInterval(function checkRest() {
@@ -2010,7 +2134,7 @@
 
         return h(React.Fragment, null,
           h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer sr-drawer--right', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('bookNotes') },
+          h('aside', { className: 'sr-drawer ' + (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right'), role: 'dialog', 'aria-modal': 'true', 'aria-label': t('bookNotes') },
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.author),
@@ -2264,7 +2388,7 @@
         const results = searchResult.results;
         return h(React.Fragment, null,
           h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer sr-drawer--right sr-drawer--search', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('searchInBook') },
+          h('aside', { className: 'sr-drawer ' + (settings.sideRail ? 'sr-drawer--left' : 'sr-drawer--right') + ' sr-drawer--search', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('searchInBook') },
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.title),
@@ -2444,6 +2568,7 @@
         const settingsTabs = [
           { id: 'appearance', label: t('settingsTabAppearance') },
           { id: 'typography', label: t('settingsTabTypography') },
+          { id: 'layout', label: t('settingsTabLayout') },
           { id: 'reading', label: t('settingsTabReading') },
         ];
         function typeField(field) {
@@ -2628,6 +2753,57 @@
             }),
           ),
         );
+        const layoutPanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('readingLayout')),
+            ),
+            h('div', { className: 'sr-segment sr-segment--wide' },
+              [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'scroll', key: 'layoutScroll' }].map(function option(item) {
+                return h('button', {
+                  key: item.value,
+                  type: 'button',
+                  'aria-pressed': (settings.layout || 'page') === item.value,
+                  onClick: function pick() { applySettings({ layout: item.value }); },
+                  style: { flex: 1 },
+                }, t(item.key));
+              }),
+            ),
+            h('p', { className: 'sr-settings-hint' }, t('layoutModeHint')),
+          ),
+          h('div', { className: 'sr-settings-list' },
+            readingRow({
+              id: 'immersive', label: t('immersive'), hint: t('immersiveHint'),
+              checked: settings.immersive === true,
+              onToggle: function toggleImmersive() { applySettings({ immersive: !settings.immersive }); },
+            }),
+            readingRow({
+              id: 'chapter-opener', label: t('chapterOpener'), hint: t('chapterOpenerHint'),
+              checked: settings.chapterOpener !== false,
+              onToggle: function toggleOpener() { applySettings({ chapterOpener: settings.chapterOpener === false }); },
+            }),
+            readingRow({
+              id: 'edge-meta', label: t('edgeMeta'), hint: t('edgeMetaHint'),
+              checked: settings.edgeMeta !== false,
+              onToggle: function toggleEdgeMeta() { applySettings({ edgeMeta: settings.edgeMeta === false }); },
+            }),
+            readingRow({
+              id: 'focus-mode', label: t('focusMode'), hint: t('focusModeHint'),
+              checked: settings.focusMode === true,
+              onToggle: function toggleFocus() { applySettings({ focusMode: !settings.focusMode }); },
+            }),
+            readingRow({
+              id: 'side-rail', label: t('sideRail'), hint: t('sideRailHint'),
+              checked: settings.sideRail === true,
+              onToggle: function toggleRail() { applySettings({ sideRail: !settings.sideRail }); },
+            }),
+            readingRow({
+              id: 'minimal-dock', label: t('minimalDock'), hint: t('minimalDockHint'),
+              checked: settings.minimalDock !== false,
+              onToggle: function toggleDock() { applySettings({ minimalDock: settings.minimalDock === false }); },
+            }),
+          ),
+        );
         const readingPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-list' },
             readingRow({
@@ -2674,9 +2850,11 @@
         );
         const panel = settingsTab === 'typography'
           ? typographyPanel
-          : settingsTab === 'reading'
-            ? readingPanel
-            : appearancePanel;
+          : settingsTab === 'layout'
+            ? layoutPanel
+            : settingsTab === 'reading'
+              ? readingPanel
+              : appearancePanel;
         return h(React.Fragment, null,
           h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
           h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
@@ -2974,6 +3152,61 @@
         );
       }
 
+      function chapterOpenNode() {
+        if (settings.chapterOpener !== false) {
+          return h('section', { className: 'sr-chapter-opener' },
+            h('span', { className: 'sr-chapter-opener-book' }, book.title),
+            h('span', { className: 'sr-chapter-opener-kicker' }, fill(t('chapterIndex'), { n: chapterIndex + 1 })),
+            h('h1', { className: 'sr-chapter-opener-title' }, chapter.title),
+            book.author ? h('span', { className: 'sr-chapter-opener-author' }, book.author) : null,
+            h('span', { className: 'sr-chapter-opener-rule', 'aria-hidden': 'true' }),
+          );
+        }
+        return h('header', { className: 'sr-chapter-head' },
+          h('div', { className: 'sr-chapter-meta' },
+            h('span', { className: 'sr-chapter-kicker' }, fill(t('chapterIndex'), { n: chapterIndex + 1 })),
+            book.author ? h('span', { className: 'sr-chapter-author' }, book.author) : null,
+          ),
+          h('h1', { className: 'sr-chapter-title' }, chapter.title),
+        );
+      }
+
+      function chapterEndNode() {
+        if (chapterIndex >= chapters.length - 1) {
+          return h('div', { className: 'sr-chapter-end sr-chapter-end--book', ref: endRef },
+            h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
+            h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
+          );
+        }
+        return h('button', {
+          type: 'button',
+          className: 'sr-chapter-end sr-chapter-end--next',
+          ref: endRef,
+          title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+          'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+          onClick: function nextChapter(event) {
+            event.stopPropagation();
+            goChapter(chapterIndex + 1, 'start');
+          },
+        },
+          h('span', null, '· ' + t('chapterEnd') + ' ·'),
+          h('span', { className: 'sr-chapter-end-next' },
+            h('span', null, t('nextChapter')),
+            h('strong', null, chapters[chapterIndex + 1].title),
+            h(Icon, { name: 'chevron-right', size: 11 }),
+          ),
+        );
+      }
+
+      function handleScroll(event) {
+        if (!scrollMode) return;
+        const element = event.currentTarget;
+        const max = Math.max(0, element.scrollHeight - element.clientHeight);
+        const ratio = max > 0 ? clamp(element.scrollTop / max, 0, 1) : 0;
+        setScrollRatio(ratio);
+        currentPercentRef.current = ratio;
+      }
+
       if (!chapters.length) {
         return h('div', {
           className: 'sr-reader',
@@ -2997,6 +3230,8 @@
         className: 'sr-reader',
         'data-theme': activeThemeId,
         'data-page-width': settings.pageWidth,
+        'data-layout': settings.layout || 'page',
+        'data-minimal-dock': settings.minimalDock !== false ? 'true' : 'false',
         'data-tts': tts.status === 'idle' ? 'false' : 'true',
         ref: readerRef,
         tabIndex: -1,
@@ -3008,6 +3243,22 @@
           'aria-atomic': 'true',
         }, fill(t('readingLivePage'), { chapter: chapter.title, page: page + 1, total: pageCount })),
         h('div', { className: 'sr-reader-slim-progress', style: { width: overallBookPct + '%' }, 'aria-hidden': 'true', title: overallBookPct + '%' }),
+        settings.focusMode ? h(React.Fragment, null,
+          h('div', {
+            className: 'sr-focus-mask sr-focus-mask--top',
+            style: { height: Math.max(0, rulerY - 130) + 'px' },
+            'aria-hidden': 'true',
+          }),
+          h('div', {
+            className: 'sr-focus-mask sr-focus-mask--bottom',
+            style: { top: Math.min(box.h, rulerY + 130) + 'px', bottom: '0px' },
+            'aria-hidden': 'true',
+          }),
+        ) : null,
+        (!chrome && settings.edgeMeta !== false) ? h('div', { className: 'sr-edge-meta', 'aria-hidden': 'true' },
+          h('span', { className: 'sr-edge-book' }, book.title),
+          h('span', { className: 'sr-edge-chapter' }, chapter.title + ' · ' + pageLabel),
+        ) : null,
         h('header', { className: 'sr-reader-top' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-top-left' },
             h('button', { type: 'button', className: 'sr-reader-back', onClick: props.onExit, title: t('readerBack') },
@@ -3144,16 +3395,17 @@
             className: 'sr-page-edge sr-page-edge--prev',
             'aria-label': t('prevPage'),
             title: t('prevPage'),
-            disabled: page <= 0 && chapterIndex <= 0,
+            disabled: !scrollMode && page <= 0 && chapterIndex <= 0,
             onClick: function prev(e) { e.stopPropagation(); prevPage(); },
           }, h(Icon, { name: 'chevron-left', size: 18 })),
           h('div', {
-            className: 'sr-stage',
+            className: 'sr-stage' + (spread ? ' sr-stage--spread' : '') + (scrollMode ? ' sr-stage--scroll' : ''),
+            'data-mode': scrollMode ? 'scroll' : 'paged',
             ref: stageRef,
             onPointerDown: handlePointerDown,
             onPointerUp: handlePointerUp,
             onMouseMove: function handleMouseMove(e) {
-              if ((rulerOpen || settings.readingRuler) && stageRef.current) {
+              if ((rulerOpen || settings.readingRuler || settings.focusMode) && stageRef.current) {
                 const rect = stageRef.current.getBoundingClientRect();
                 setRulerY(clamp(e.clientY - rect.top, 24, Math.max(24, rect.height - 24)));
               }
@@ -3179,14 +3431,15 @@
             h('div', {
               className: 'sr-page-track',
               'data-instant': animate ? 'false' : 'true',
-              style: { transform: 'translate3d(' + (-Math.min(page, pageCount - 1) * step) + 'px,0,0)' },
+              style: { transform: scrollMode ? 'none' : 'translate3d(' + (-Math.min(page, pageCount - 1) * viewStep) + 'px,0,0)' },
             },
               h('div', {
                 ref: columnsRef,
-                className: 'sr-columns',
+                className: 'sr-columns' + (scrollMode ? ' sr-columns--scroll' : ''),
+                onScroll: scrollMode ? handleScroll : undefined,
                 'data-font': settings.fontFamily,
                 style: {
-                  width: pageW || '100%',
+                  width: pageW ? (spread ? pageW * 2 + gap : pageW) : '100%',
                   height: pageH || '100%',
                   columnWidth: pageW || undefined,
                   columnGap: gap,
@@ -3198,37 +3451,9 @@
                   visibility: pageW ? 'visible' : 'hidden',
                 },
               },
-                h('header', { className: 'sr-chapter-head' },
-                  h('div', { className: 'sr-chapter-meta' },
-                    h('span', { className: 'sr-chapter-kicker' }, fill(t('chapterIndex'), { n: chapterIndex + 1 })),
-                    book.author ? h('span', { className: 'sr-chapter-author' }, book.author) : null,
-                  ),
-                  h('h1', { className: 'sr-chapter-title' }, chapter.title),
-                ),
+                chapterOpenNode(),
                 paragraphNodes,
-                chapterIndex >= chapters.length - 1
-                  ? h('div', { className: 'sr-chapter-end sr-chapter-end--book', ref: endRef },
-                      h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
-                      h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
-                    )
-                  : h('button', {
-                      type: 'button',
-                      className: 'sr-chapter-end sr-chapter-end--next',
-                      ref: endRef,
-                      title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
-                      'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
-                      onClick: function nextChapter(event) {
-                        event.stopPropagation();
-                        goChapter(chapterIndex + 1, 'start');
-                      },
-                    },
-                      h('span', null, '· ' + t('chapterEnd') + ' ·'),
-                      h('span', { className: 'sr-chapter-end-next' },
-                        h('span', null, t('nextChapter')),
-                        h('strong', null, chapters[chapterIndex + 1].title),
-                        h(Icon, { name: 'chevron-right', size: 11 }),
-                      ),
-                    ),
+                chapterEndNode(),
               ),
             ),
           ),
@@ -3237,7 +3462,7 @@
             className: 'sr-page-edge sr-page-edge--next',
             'aria-label': t('nextPage'),
             title: t('nextPage'),
-            disabled: page >= pageCount - 1 && chapterIndex >= chapters.length - 1,
+            disabled: !scrollMode && page >= pageCount - 1 && chapterIndex >= chapters.length - 1,
             onClick: function next(e) { e.stopPropagation(); nextPage(); },
           }, h(Icon, { name: 'chevron-right', size: 18 })),
         ),
@@ -3249,7 +3474,7 @@
           'aria-label': t('shortcutChrome'),
           onClick: function showChrome(e) { e.stopPropagation(); setChrome(true); },
           onKeyDown: function handleKey(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setChrome(true); } },
-        }, clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel) : null,
+        }, settings.immersive ? pageLabel : (clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel)) : null,
         h('div', { className: 'sr-reader-bottom' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-bottom-inner' },
             h('button', { type: 'button', className: 'sr-reader-tool', onClick: function toc() { setDrawer('toc'); }, title: t('readerToc') },
@@ -3275,12 +3500,26 @@
                 type: 'range',
                 className: 'sr-reader-range',
                 min: 0,
-                max: Math.max(0, pageCount - 1),
+                max: scrollMode ? 1000 : Math.max(0, pageCount - 1),
                 step: 1,
-                value: Math.min(page, pageCount - 1),
-                disabled: pageCount <= 1,
-                'aria-label': t('pageOf', { n: page + 1, m: pageCount }),
-                onChange: function change(event) { setPage(Number(event.target.value)); dismissPopovers(); },
+                value: scrollMode ? Math.round(scrollRatio * 1000) : Math.min(page, pageCount - 1),
+                disabled: scrollMode ? false : pageCount <= 1,
+                'aria-label': scrollMode ? pageLabel : t('pageOf', { n: page + 1, m: pageCount }),
+                onChange: function change(event) {
+                  if (scrollMode) {
+                    const ratio = clamp(Number(event.target.value) / 1000, 0, 1);
+                    const element = columnsRef.current;
+                    if (element) {
+                      const max = Math.max(0, element.scrollHeight - element.clientHeight);
+                      element.scrollTop = ratio * max;
+                    }
+                    setScrollRatio(ratio);
+                    currentPercentRef.current = ratio;
+                    return;
+                  }
+                  setPage(Number(event.target.value));
+                  dismissPopovers();
+                },
               }),
               h('div', { className: 'sr-page-jump-anchor' },
                 h('button', {
@@ -3290,6 +3529,7 @@
                   'aria-haspopup': 'dialog',
                   'aria-expanded': pageJumpOpen ? 'true' : 'false',
                   onClick: function toggleJump() {
+                    if (scrollMode) return;
                     if (pageJumpOpen) { setPageJumpOpen(false); return; }
                     dismissPopovers();
                     setPageJumpDraft(String(page + 1));

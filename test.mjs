@@ -331,7 +331,9 @@ const normalized = T.normalizeState({
 });
 assert.deepEqual(plain(normalized.settings), {
   theme: 'paper', fontSize: 28, lineHeight: 1.5, fontFamily: 'serif',
-  letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false, paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
+  letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false,
+  immersive: false, layout: 'page', chapterOpener: true, edgeMeta: true, focusMode: false, sideRail: false, minimalDock: true,
+  paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
   textAlign: 'justify', readingRuler: false,
 });
 const customTypography = T.normalizeState({ settings: { letterSpacing: 1, paragraphSpacing: 0, pageWidth: 'massive', textAlign: 'left', paperSound: true, readingRuler: true } });
@@ -342,6 +344,15 @@ assert.equal(customTypography.settings.pageWidth, 'comfortable');
 assert.equal(customTypography.settings.autoHideChrome, false);
 assert.equal(customTypography.settings.paperSound, true);
 assert.equal(customTypography.settings.textAlign, 'left');
+const customLayout = T.normalizeState({ settings: { layout: 'scroll', immersive: true, chapterOpener: false, edgeMeta: false, focusMode: true, sideRail: true, minimalDock: false } });
+assert.equal(customLayout.settings.layout, 'scroll');
+assert.equal(customLayout.settings.immersive, true);
+assert.equal(customLayout.settings.chapterOpener, false);
+assert.equal(customLayout.settings.edgeMeta, false);
+assert.equal(customLayout.settings.focusMode, true);
+assert.equal(customLayout.settings.sideRail, true);
+assert.equal(customLayout.settings.minimalDock, false);
+assert.equal(T.normalizeState({ settings: { layout: 'bad' } }).settings.layout, 'page');
 assert.equal(T.normalizeState({ settings: { autoHideChrome: true } }).settings.autoHideChrome, true);
 assert.equal(T.normalizeState({ settings: { highlightColor: 'sky' } }).settings.highlightColor, 'sky');
 assert.equal(T.normalizeState({ settings: { highlightColor: 'bad' } }).settings.highlightColor, 'amber');
