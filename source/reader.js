@@ -1624,18 +1624,32 @@
             return h('p', { key: index, 'data-p': index, className: 'sr-figure-missing' },
               t('imageMissing', { name: picture.name }));
           }
-          const trimmed = text.trim();
+          let safeText = text;
+          if (!safeText.includes('<blockquote')) safeText = safeText.replace(/<\/blockquote\s*>/gi, '');
+          if (!safeText.includes('<table')) safeText = safeText.replace(/<\/table\s*>/gi, '');
+          if (!safeText.includes('<aside')) safeText = safeText.replace(/<\/aside\s*>/gi, '');
+          if (!safeText.includes('<figure')) safeText = safeText.replace(/<\/figure\s*>/gi, '');
+          if (!safeText.includes('<pre')) safeText = safeText.replace(/<\/pre\s*>/gi, '');
+          if (!safeText.includes('<ul')) safeText = safeText.replace(/<\/ul\s*>/gi, '');
+          if (!safeText.includes('<ol')) safeText = safeText.replace(/<\/ol\s*>/gi, '');
+          const trimmed = safeText.trim();
+          if (!trimmed) return null;
+
+          // 0. Drop orphaned container tags so they never render as plain text
+          if (/^<\/?(?:blockquote|table|aside|figure|pre|code|ul|ol|li|div|p|span|section|article|h[1-6])\s*>$/i.test(trimmed)) {
+            return null;
+          }
 
           // 1. EPUB Rich HTML block (ruby, strong, em, table, blockquote, footnotes, headings)
-          if (/<[a-z0-9]+\b[^>]*>/i.test(text)) {
+          if (/<\/?([a-z0-9]+)\b[^>]*>/i.test(safeText)) {
             const base = offsets.offsets[index];
-            const cleanLen = stripHtmlTags(text).length;
+            const cleanLen = stripHtmlTags(safeText).length;
             const relevantHls = chapterHighlights.filter(function(h) {
               return h.end > base && h.start < base + cleanLen;
             });
-            const renderedHtml = applyHtmlHighlights(text, base, relevantHls);
+            const renderedHtml = applyHtmlHighlights(safeText, base, relevantHls);
 
-            if (trimmed.startsWith('<table') && trimmed.endsWith('</table>')) {
+            if (/^<table\b/i.test(trimmed)) {
               return h('div', {
                 key: index,
                 'data-p': index,
@@ -1646,41 +1660,45 @@
                 dangerouslySetInnerHTML: { __html: renderedHtml }
               });
             }
-            if (trimmed.startsWith('<blockquote') && trimmed.endsWith('</blockquote>')) {
+            if (/^<blockquote\b/i.test(trimmed)) {
+              const bqIdMatch = trimmed.match(/^<blockquote\b[^>]*\bid=["']([^"']+)["']/i);
+              const bqClassMatch = trimmed.match(/^<blockquote\b[^>]*\bclass=["']([^"']+)["']/i);
+              const bqInner = renderedHtml.replace(/^<blockquote\b[^>]*>/i, '').replace(/<\/blockquote\s*>$/i, '');
               return h('blockquote', {
                 key: index,
                 'data-p': index,
-                className: 'sr-quote',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<blockquote\b[^>]*>/i, '').replace(/<\/blockquote>$/i, '') }
+                id: bqIdMatch ? bqIdMatch[1] : undefined,
+                className: 'sr-quote' + (bqClassMatch ? ' ' + bqClassMatch[1] : ''),
+                dangerouslySetInnerHTML: { __html: bqInner }
               });
             }
-            if (/^<h[1-6]\b/i.test(trimmed) && /<\/h[1-6]>$/i.test(trimmed)) {
+            if (/^<h[1-6]\b/i.test(trimmed)) {
               const Tag = trimmed.slice(1, 3).toLowerCase();
               return h(Tag, {
                 key: index,
                 'data-p': index,
                 className: 'sr-subheading',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<h[1-6]\b[^>]*>/i, '').replace(/<\/h[1-6]>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<h[1-6]\b[^>]*>/i, '').replace(/<\/h[1-6]\s*>$/i, '') }
               });
             }
-            if (/^<aside\b/i.test(trimmed) && /<\/aside>$/i.test(trimmed)) {
+            if (/^<aside\b/i.test(trimmed)) {
               const idMatch = trimmed.match(/\bid=["']([^"']+)["']/i);
               return h('aside', {
                 key: index,
                 'data-p': index,
                 id: idMatch ? idMatch[1] : undefined,
                 className: 'sr-aside-note',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<aside\b[^>]*>/i, '').replace(/<\/aside>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<aside\b[^>]*>/i, '').replace(/<\/aside\s*>$/i, '') }
               });
             }
             if (trimmed.startsWith('<hr')) {
               return h('div', { key: index, 'data-p': index, className: 'sr-divider-wrap' }, h('hr', { className: 'sr-divider' }));
             }
-            if (trimmed.startsWith('<pre') && trimmed.endsWith('</pre>')) {
-              const codeMatch = trimmed.match(/^<pre\b[^>]*><code\b(?:\s+class=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/code><\/pre>$/i);
+            if (/^<pre\b/i.test(trimmed)) {
+              const codeMatch = trimmed.match(/^<pre\b[^>]*><code\b(?:\s+class=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/code><\/pre\s*>$/i);
               const langMatch = (codeMatch && codeMatch[1] && codeMatch[1].match(/(?:language-|lang-)?([a-z0-9_-]+)/i)) || trimmed.match(/class=["'](?:language-|lang-|brush:\s*)?([a-z0-9_-]+)/i);
               const lang = (langMatch && langMatch[1]) ? langMatch[1].toUpperCase() : '';
-              const preInner = renderedHtml.replace(/^<pre\b[^>]*>/i, '').replace(/<\/pre>$/i, '');
+              const preInner = renderedHtml.replace(/^<pre\b[^>]*>/i, '').replace(/<\/pre\s*>$/i, '');
               const plainCode = stripHtmlTags(preInner);
               return h('div', {
                 key: index,
@@ -1710,27 +1728,27 @@
                 })
               );
             }
-            if ((trimmed.startsWith('<ul') && trimmed.endsWith('</ul>')) || (trimmed.startsWith('<ol') && trimmed.endsWith('</ol>'))) {
+            if (/^<(?:ul|ol)\b/i.test(trimmed)) {
               const Tag = trimmed.startsWith('<ol') ? 'ol' : 'ul';
               return h(Tag, {
                 key: index,
                 'data-p': index,
                 style: { margin: 'calc(var(--sr-para-gap,.9em) * .8) 0', paddingLeft: '1.8em', textIndent: 0 },
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<(?:ul|ol)\b[^>]*>/i, '').replace(/<\/(?:ul|ol)>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<(?:ul|ol)\b[^>]*>/i, '').replace(/<\/(?:ul|ol)\s*>$/i, '') }
               });
             }
-            if (trimmed.startsWith('<figure') && trimmed.endsWith('</figure>')) {
+            if (/^<figure\b/i.test(trimmed)) {
               return h('figure', {
                 key: index,
                 'data-p': index,
                 className: 'sr-figure',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<figure\b[^>]*>/i, '').replace(/<\/figure>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<figure\b[^>]*>/i, '').replace(/<\/figure\s*>$/i, '') }
               });
             }
             const pIdMatch = trimmed.match(/^<p\b[^>]*\bid=["']([^"']+)["']/i);
             const pClassMatch = trimmed.match(/^<p\b[^>]*\bclass=["']([^"']+)["']/i);
             const pInnerHtml = /^<p\b[^>]*>/i.test(renderedHtml)
-              ? renderedHtml.replace(/^<p\b[^>]*>/i, '').replace(/<\/p>$/i, '')
+              ? renderedHtml.replace(/^<p\b[^>]*>/i, '').replace(/<\/p\s*>$/i, '')
               : renderedHtml;
             return h('p', {
               key: index,

@@ -31,7 +31,7 @@ assert.match(read('icon.svg'), /<svg[\s>]/);
 let clientSource = read('client.js');
 const marker = '    return {\n      inject:';
 assert.ok(clientSource.includes(marker), 'plugin export marker is present');
-const exposed = '    globalThis.__test = { isEpubBook, isMarkdownBook, bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, parseMarkdownTable, parseMarkdownList, parseMarkdownCallout, renderInline, stripHtmlTags, injectHighlightIntoHtml, applyHtmlHighlights, saveState, unwrittenBookIds, parseEpubBook, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
+const exposed = '    globalThis.__test = { isEpubBook, isMarkdownBook, bytesToBase64, downscaleCoverDataUrl, makeCoverThumbnail, invertSelectionKeys, pickRandomHighlight, peakWeekday, sortReviewItems, formatClock, formatBookInfo, formatWordCount, buildBookTitlesText, parseImportedBook, parseMarkdownTable, parseMarkdownList, parseMarkdownCallout, renderInline, stripHtmlTags, injectHighlightIntoHtml, applyHtmlHighlights, saveState, unwrittenBookIds, parseEpubBook, extractEpubChapter, normalizeState, defaultState, searchBookChapters, chapterBaseOffsets, weekSeries, weekComparison, weekDeltaLabel, stepIndex, readerKeyAction, stepFontSize, resolveReaderTheme, splitDuplicateImports, importBookSignature, lastReadRelative, stripFsBookBodies, stateForStorage, adoptLibrarySnapshot, orphanBodyIds, deferBodyRemoval, imageParagraph, chapterText, fsRememberSource, fsBase64ToBytes, bookBodyText, parseBookBodyText, chapterIdsOf, markBodiesOnDisk, fsBodyFileName, fsSafeName, fsDeleteBodyFile, fsWriteBookBody, fsWriteNewBookBody, fsReadBookBody, fsDeleteBookBody, fsMigrateBodiesToText, fsLibrarySupported, fsErrorCode, fsChooseDirectory, fsWriteSnapshotNow, mergePins, applyTagToBooks, removeTagFromBooks, removeBooksFromState, toggleId, setBooksFinished, setIdsBulk, recolorHighlights, readingStreak, progressPercent, progressChapter, decodeTextBytes, makeBackupPayload, parseBackupPayload, withBookMetadata, sortShelfBooks, computeAchievements, cleanUserTags, cleanNoteTags, renameBookTagEverywhere, removeBookTagEverywhere, bookTagSummary, matchBookTags, averageDailySeconds, estimateFinish, dayKey, paletteResults, groupNotesByMonth, groupNotesByBook, CommandPalette, sameTagList, renameHighlightTag, removeHighlightTag, applyTagToHighlights, removeTagFromHighlights, highlightSegments, searchTerms, matchAllTerms, translate, fill, normalizeChapterMarks, recordChapterMark, chapterResumePercent, normalizeSessions, normalizeReviews, bookNotesMarkdown, bookFullMarkdown, bookMarkdownFilename, buildReviewText, buildQuoteText, buildCalloutText, selectedAnnotationsMarkdown, notebookMarkdown, notebookByTagMarkdown, booklistMarkdown, reviewsMarkdown, sortNotebookItems, chapterOverview, splitSelectionKeys, ShelfView, StatsView, NotesView, TagManagerDialog, readerLightbox, BookDetail, Reader, PasteImportDialog, QuoteCardDialog, quoteCardText, wrapQuoteText, quoteCardLayout, quoteCardTheme, quoteCardFilename, drawQuoteCard, collectionCardLayout, drawCollectionCard, quoteCollectionFilename, QuoteCollectionDialog, monthlySummary, readingTimeOfDay, monthKeyOf, monthlyCardLayout, drawMonthlyCard, monthlyCardFilename, MonthlyCardDialog, dailyGoalMinutes, todayGoalProgress, remainingReadingMinutes, sessionsForBook, sessionsOnDay, pickDailyQuote, similarBooks, pickRandomBook, resolveContinueBook, groupBooksByStatus, readingReportMarkdown, searchLibraryBooks, bookReadingRanking, tagReadingTotals, nextSleepTimer, readerExcerptAt, recentDays, heatLevel, weekdayTotals, splitSpeechChunks, speechLanguage, speechChunkOffsets, nextSpeechChapter, emitReaderTelemetry };\n';
 const instrumented = clientSource.replace(marker, exposed + marker);
 
 const registrations = [];
@@ -1755,6 +1755,26 @@ const epubBlob = new Blob([epubBytes]);
 const epubBlobBook = await T.parseEpubBook('海边的书.epub', epubBlob);
 assert.equal(epubBlobBook.title, '海边的书');
 assert.equal(epubBlobBook.chapters.length, 2);
+
+// Blockquote extraction keeps blockquote and its inner paragraphs intact without orphaned </blockquote>
+const bqHtml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>引言测试</title></head>
+<body>
+  <p>引言前段落。</p>
+  <blockquote class="poetic">
+    <p>生如夏花之绚烂，</p>
+    <p>死如秋叶之静美。</p>
+  </blockquote>
+  <p>引言后段落。</p>
+</body>
+</html>`;
+const extractedBq = T.extractEpubChapter(bqHtml, '引言测试');
+assert.equal(extractedBq.paragraphs.length, 3, 'blockquote with paragraphs stays together as a single block');
+assert.ok(extractedBq.paragraphs[1].startsWith('<blockquote') && extractedBq.paragraphs[1].endsWith('</blockquote>'), 'blockquote contains opening and closing tags');
+assert.ok(extractedBq.paragraphs[1].includes('生如夏花之绚烂'), 'inner paragraphs preserved');
+assert.ok(!extractedBq.paragraphs.some(p => p.trim() === '</blockquote>'), 'no orphaned </blockquote> paragraph');
 const normalizedEpub = T.normalizeState({ customBooks: [epubBook] });
 const smokeNoop = () => {};
 const smokeT = (key) => key;
@@ -2041,6 +2061,8 @@ const epubRichBook = {
     title: '第一章 丰富排版',
     paragraphs: [
       '<p>正文段落开头。</p>',
+      '<blockquote class=\"classic-quote\"><p>昔者庄周梦为胡蝶，栩栩然胡蝶也。</p><p>俄然觉，则蘧蘧然周也。</p></blockquote>',
+      '</blockquote>',
       '<pre><code class=\"language-python\">def hello():\n    print(\"Hello world\")</code></pre>',
       '<ul>\n<li>列表项 1</li>\n<li>列表项 2</li>\n</ul>',
       '~~~~~~~~~~~~~~~~~~~~',
@@ -2054,6 +2076,8 @@ const allEpubRichNodes = collectNodes(epubRichReader, []);
 assert.ok(allEpubRichNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-code-container')), 'epub pre code block rendered as code container');
 assert.ok(allEpubRichNodes.some(n => typeof n.props.className === 'string' && n.props.className.includes('sr-code-lang') && n.props.children === 'PYTHON'), 'epub code lang PYTHON detected');
 assert.ok(allEpubRichNodes.some(n => n && n.type === 'ul'), 'epub ul list rendered natively as ul');
+assert.ok(allEpubRichNodes.some(n => n && n.type === 'blockquote' && typeof n.props.className === 'string' && n.props.className.includes('classic-quote')), 'epub blockquote rendered natively with classic-quote class');
+assert.ok(!allEpubRichNodes.some(n => n && n.props && (n.props.children === '</blockquote>' || (typeof n.props.children === 'string' && n.props.children.includes('</blockquote>')))), 'orphaned </blockquote> is never rendered as raw text');
 const dividerWraps = allEpubRichNodes.filter(n => typeof n.props.className === 'string' && n.props.className.includes('sr-divider-wrap'));
 assert.equal(dividerWraps.length, 2, 'both repeated tildes (~~~~) and dashes (----) rendered as dividers, not code blocks');
 assert.equal(T.imageParagraph('![潮水](img-1-1.png)').name, 'img-1-1.png');

@@ -291,7 +291,7 @@
     const PRESERVED_EPUB_BLOCK_TAGS = new Set([
       'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'blockquote', 'pre', 'ul', 'ol', 'li', 'figure', 'figcaption', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr',
-      'aside'
+      'aside', 'p'
     ]);
 
     function extractEpubChapter(rawHtml, fallbackTitle) {
@@ -347,11 +347,15 @@
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
         .replace(/@(page|font-face|media|charset|import|keyframes)\b[^{]*\{[^}]*\}/gi, ' ');
 
-      // Protect <pre> blocks from whitespace mangling and accidental paragraph splitting
-      const preBlocks = [];
-      content = content.replace(/<pre\b([^>]*)>([\s\S]*?)<\/pre\s*>/gi, function protectPre(m, attrs, body) {
-        preBlocks.push({ attrs: attrs, body: body });
-        return '\n\n\u0000pre:' + (preBlocks.length - 1) + '\u0000\n\n';
+      // Protect block containers (pre, table, aside, figure, ul, ol, blockquote) from accidental splitting
+      const containerBlocks = [];
+      const CONTAINER_TAGS = ['pre', 'table', 'aside', 'figure', 'ul', 'ol', 'blockquote'];
+      CONTAINER_TAGS.forEach(function protect(tagName) {
+        const pattern = new RegExp('<(' + tagName + ')\\b([^>]*)>([\\s\\S]*?)<\\/\\1\\s*>', 'gi');
+        content = content.replace(pattern, function keep(match, tag, attrs, inner) {
+          containerBlocks.push({ tag: tag.toLowerCase(), attrs: attrs, inner: inner });
+          return '\n\n\u0000block:' + (containerBlocks.length - 1) + '\u0000\n\n';
+        });
       });
 
       // Preserve block boundaries for containers
@@ -370,57 +374,97 @@
         });
 
       // Sanitize attributes and preserve allowed tags (ruby, strong, em, table, etc.)
-      content = content.replace(/<\/?([a-z0-9]+)\b([^>]*)>/gi, function keepTag(match, tagName, attrs) {
-        const tag = tagName.toLowerCase();
-        if (ALLOWED_EPUB_INLINE_TAGS.has(tag) || PRESERVED_EPUB_BLOCK_TAGS.has(tag)) {
-          if (match.startsWith('</')) return '</' + tag + '>';
-          let safeAttrs = '';
-          const hrefMatch = attrs.match(/\bhref\s*=\s*("[^"]*"|'[^']*')/i);
-          const classMatch = attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
-          const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
-          const nameMatch = attrs.match(/\bname\s*=\s*("[^"]*"|'[^']*')/i);
-          const roleMatch = attrs.match(/\brole\s*=\s*("[^"]*"|'[^']*')/i);
-          const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
-          const alignMatch = attrs.match(/\balign\s*=\s*("[^"]*"|'[^']*')/i);
-          const colspanMatch = attrs.match(/\bcolspan\s*=\s*("[^"]*"|'[^']*')/i);
-          const rowspanMatch = attrs.match(/\browspan\s*=\s*("[^"]*"|'[^']*')/i);
-          if (hrefMatch) safeAttrs += ' ' + hrefMatch[0];
-          if (classMatch) safeAttrs += ' ' + classMatch[0];
-          if (idMatch) safeAttrs += ' ' + idMatch[0];
-          if (nameMatch) {
-            safeAttrs += ' ' + nameMatch[0];
-            if (!idMatch) safeAttrs += ' id=' + nameMatch[1];
+      function sanitizeAttrsAndTags(htmlSource) {
+        return String(htmlSource || '').replace(/<\/?([a-z0-9]+)\b([^>]*)>/gi, function keepTag(match, tagName, attrs) {
+          const tag = tagName.toLowerCase();
+          if (ALLOWED_EPUB_INLINE_TAGS.has(tag) || PRESERVED_EPUB_BLOCK_TAGS.has(tag)) {
+            if (match.startsWith('</')) return '</' + tag + '>';
+            let safeAttrs = '';
+            const hrefMatch = attrs.match(/\bhref\s*=\s*("[^"]*"|'[^']*')/i);
+            const classMatch = attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
+            const idMatch = attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
+            const nameMatch = attrs.match(/\bname\s*=\s*("[^"]*"|'[^']*')/i);
+            const roleMatch = attrs.match(/\brole\s*=\s*("[^"]*"|'[^']*')/i);
+            const epubTypeMatch = attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
+            const alignMatch = attrs.match(/\balign\s*=\s*("[^"]*"|'[^']*')/i);
+            const colspanMatch = attrs.match(/\bcolspan\s*=\s*("[^"]*"|'[^']*')/i);
+            const rowspanMatch = attrs.match(/\browspan\s*=\s*("[^"]*"|'[^']*')/i);
+            if (hrefMatch) safeAttrs += ' ' + hrefMatch[0];
+            if (classMatch) safeAttrs += ' ' + classMatch[0];
+            if (idMatch) safeAttrs += ' ' + idMatch[0];
+            if (nameMatch) {
+              safeAttrs += ' ' + nameMatch[0];
+              if (!idMatch) safeAttrs += ' id=' + nameMatch[1];
+            }
+            if (roleMatch) safeAttrs += ' ' + roleMatch[0];
+            if (epubTypeMatch) safeAttrs += ' ' + epubTypeMatch[0];
+            if (alignMatch) safeAttrs += ' ' + alignMatch[0];
+            if (colspanMatch) safeAttrs += ' ' + colspanMatch[0];
+            if (rowspanMatch) safeAttrs += ' ' + rowspanMatch[0];
+            return '<' + tag + safeAttrs + '>';
           }
-          if (roleMatch) safeAttrs += ' ' + roleMatch[0];
-          if (epubTypeMatch) safeAttrs += ' ' + epubTypeMatch[0];
-          if (alignMatch) safeAttrs += ' ' + alignMatch[0];
-          if (colspanMatch) safeAttrs += ' ' + colspanMatch[0];
-          if (rowspanMatch) safeAttrs += ' ' + rowspanMatch[0];
-          return '<' + tag + safeAttrs + '>';
-        }
-        return '';
-      });
+          return '';
+        });
+      }
+
+      content = sanitizeAttrsAndTags(content);
 
       content = decodeEpubEntities(content).replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
       const lines = content.split('\n').map(function clean(line) { return line.replace(/[ \t]+/g, ' ').trim(); });
       const cleaned = lines.join('\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
       let paragraphs = cleaned.split(/\n{2,}/).map(function trim(value) { return value.replace(/[ \t]+/g, ' ').trim(); }).filter(Boolean);
 
-      // Restore protected <pre> blocks
-      paragraphs = paragraphs.map(function restorePre(p) {
-        const prePlaceholder = /^\u0000pre:(\d+)\u0000$/.exec(p);
-        if (prePlaceholder) {
-          const item = preBlocks[Number(prePlaceholder[1])];
-          if (item) {
-            const classMatch = item.attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
+      // Restore protected block containers recursively
+      function restoreContainers(text) {
+        let res = text;
+        let depth = 0;
+        while (/\u0000block:(\d+)\u0000/.test(res) && depth < 10) {
+          res = res.replace(/\u0000block:(\d+)\u0000/g, function(m, idx) {
+            const item = containerBlocks[Number(idx)];
+            if (!item) return '';
+            let safeAttrs = '';
             const idMatch = item.attrs.match(/\bid\s*=\s*("[^"]*"|'[^']*')/i);
-            const safeClass = classMatch ? ' ' + classMatch[0] : '';
-            const safeId = idMatch ? ' ' + idMatch[0] : '';
-            return '<pre' + safeClass + safeId + '>' + item.body.trim() + '</pre>';
-          }
+            const classMatch = item.attrs.match(/\bclass\s*=\s*("[^"]*"|'[^']*')/i);
+            const epubTypeMatch = item.attrs.match(/\bepub:type\s*=\s*("[^"]*"|'[^']*')/i);
+            const roleMatch = item.attrs.match(/\brole\s*=\s*("[^"]*"|'[^']*')/i);
+            if (idMatch) safeAttrs += ' ' + idMatch[0];
+            if (classMatch) safeAttrs += ' ' + classMatch[0];
+            if (epubTypeMatch) safeAttrs += ' ' + epubTypeMatch[0];
+            if (roleMatch) safeAttrs += ' ' + roleMatch[0];
+            const cleanInner = sanitizeAttrsAndTags(restoreContainers(item.inner.trim()));
+            return '<' + item.tag + safeAttrs + '>' + cleanInner + '</' + item.tag + '>';
+          });
+          depth += 1;
         }
-        return p;
+        return res;
+      }
+
+      paragraphs = paragraphs.map(restoreContainers);
+
+      // Filter out any standalone opening or closing tags or empty container markers
+      paragraphs = paragraphs.filter(function isNotOrphanTag(p) {
+        const trimmedP = p.trim();
+        if (/^<\/?(?:blockquote|table|aside|figure|pre|code|ul|ol|li|div|p|span|section|article|h[1-6])\s*>$/i.test(trimmedP)) {
+          return false;
+        }
+        if (/^<(?:blockquote|table|aside|figure|pre|ul|ol|div|span|section|article)\b[^>]*>\s*<\/\1\s*>$/i.test(trimmedP)) {
+          return false;
+        }
+        return true;
       });
+
+      // Clean stray unattached closing tags from paragraph boundaries
+      paragraphs = paragraphs.map(function cleanStrayClosing(p) {
+        let clean = p;
+        if (!clean.includes('<blockquote')) clean = clean.replace(/<\/blockquote\s*>/gi, '');
+        if (!clean.includes('<table')) clean = clean.replace(/<\/table\s*>/gi, '');
+        if (!clean.includes('<aside')) clean = clean.replace(/<\/aside\s*>/gi, '');
+        if (!clean.includes('<figure')) clean = clean.replace(/<\/figure\s*>/gi, '');
+        if (!clean.includes('<pre')) clean = clean.replace(/<\/pre\s*>/gi, '');
+        if (!clean.includes('<ul')) clean = clean.replace(/<\/ul\s*>/gi, '');
+        if (!clean.includes('<ol')) clean = clean.replace(/<\/ol\s*>/gi, '');
+        return clean.trim();
+      }).filter(Boolean);
 
       // Filter out any leaked CSS rule blocks (e.g. `p { margin: 0; }` or `.calibre { ... }`)
       paragraphs = paragraphs.filter(function isNotCss(p) {
