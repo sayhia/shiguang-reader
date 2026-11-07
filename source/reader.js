@@ -149,13 +149,17 @@
           .filter(function match(item) { return item.bookId === book.id; })
           .sort(function order(a, b) { return b.createdAt - a.createdAt; });
       }, [props.bookmarks, book.id]);
+      const chapterBookmarks = useMemo(function chapterBookmarksMemo() {
+        return bookmarksForBook.filter(function inChapter(item) { return item.chapterIndex === chapterIndex; }).slice(0, 5);
+      }, [bookmarksForBook, chapterIndex]);
       const bookHighlights = useMemo(function bookHighlightsMemo() {
         return props.highlights.filter(function match(item) { return item.bookId === book.id; });
       }, [props.highlights, book.id]);
       const layout = settings.layout || 'page';
       const scrollMode = layout === 'scroll';
-      const spread = layout === 'spread' && box.w >= 980;
-      const gap = box.w && box.w < 700 ? 34 : 56;
+      const essay = layout === 'essay' && box.w >= 900;
+      const spread = (layout === 'spread' && box.w >= 980) || essay;
+      const gap = essay ? 28 : (box.w && box.w < 700 ? 34 : 56);
       const pageW = spread ? Math.max(120, Math.floor((box.w - gap) / 2)) : box.w;
       const pageH = box.h;
       const step = pageW + gap;
@@ -297,9 +301,12 @@
           dismissPopovers();
           const element = columnsRef.current;
           if (!element) return;
-          const remaining = element.scrollHeight - element.clientHeight - element.scrollTop;
-          if (remaining > 8) {
-            element.scrollBy({ top: Math.max(160, element.clientHeight * 0.82), behavior: 'smooth' });
+          const vertical = settings.writingMode === 'vertical';
+          const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+          const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+          if (max - position > 8) {
+            const amount = Math.max(160, (vertical ? element.clientWidth : element.clientHeight) * 0.82);
+            element.scrollBy({ left: vertical ? -amount : 0, top: vertical ? 0 : amount, behavior: 'smooth' });
             return;
           }
           if (chapterIndex < chapters.length - 1) {
@@ -325,15 +332,18 @@
         }
         props.onFinish(book.id);
         props.showToast(t('readerFinished'));
-      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t, scrollMode]);
+      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t, scrollMode, settings.writingMode]);
 
       const prevPage = useCallback(function previous() {
         if (scrollMode) {
           dismissPopovers();
           const element = columnsRef.current;
           if (!element) return;
-          if (element.scrollTop > 8) {
-            element.scrollBy({ top: -Math.max(160, element.clientHeight * 0.82), behavior: 'smooth' });
+          const vertical = settings.writingMode === 'vertical';
+          const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+          if (position > 8) {
+            const amount = Math.max(160, (vertical ? element.clientWidth : element.clientHeight) * 0.82);
+            element.scrollBy({ left: vertical ? amount : 0, top: vertical ? 0 : -amount, behavior: 'smooth' });
             return;
           }
           if (chapterIndex > 0) {
@@ -357,7 +367,7 @@
           return;
         }
         props.showToast(t('firstPage'));
-      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t, scrollMode]);
+      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t, scrollMode, settings.writingMode]);
 
       const applySettings = useCallback(function update(patch) {
         if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
@@ -644,14 +654,16 @@
         else if (target && typeof target === 'object' && target.page !== undefined && pageCount > 1) ratio = clamp(target.page / (pageCount - 1), 0, 1);
         pendingRef.current = null;
         const frame = window.requestAnimationFrame(function scrollTo() {
-          const max = Math.max(0, element.scrollHeight - element.clientHeight);
-          element.scrollTop = ratio * max;
+          const vertical = settings.writingMode === 'vertical';
+          const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+          if (vertical) element.scrollLeft = -ratio * max;
+          else element.scrollTop = ratio * max;
           setScrollRatio(ratio);
           currentPercentRef.current = ratio;
           readyRef.current = true;
         });
         return function cleanup() { window.cancelAnimationFrame(frame); };
-      }, [scrollMode, chapterIndex, initialIndex, initialPercent, pageCount, layout, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, settings.chapterOpener, fontTick]);
+      }, [scrollMode, chapterIndex, initialIndex, initialPercent, pageCount, layout, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, settings.chapterOpener, settings.writingMode, fontTick]);
 
       const addSecondsRef = useRef(props.onAddSeconds);
       addSecondsRef.current = props.onAddSeconds;
@@ -1323,6 +1335,10 @@
         if (selection && !selection.isCollapsed) return;
         dismissPopovers();
         if (drawer || settingsOpen || noteDraft) return;
+        if (settings.edgeTap === false) {
+          setChrome(function toggle(value) { return !value; });
+          return;
+        }
         const rect = event.currentTarget.getBoundingClientRect();
         const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
         if (ratio < 0.24) prevPage();
@@ -2599,6 +2615,40 @@
             }, h('span', { className: 'sr-switch-thumb' })),
           );
         }
+        const presetSettings = {
+          classic: {
+            preset: 'classic', theme: 'paper', layout: 'page', fontFamily: 'serif', fontSize: 19,
+            lineHeight: 1.95, pageWidth: 'comfortable', letterSpacing: 0.02, paragraphSpacing: 0.9,
+            immersive: false, chapterOpener: true, bookCover: true, edgeMeta: true, minimalDock: true,
+            focusMode: false, marginNotes: false, marginFootnotes: false, chapterRail: false,
+            sideRail: false, imageLayout: 'inline', writingMode: 'horizontal', thumbDock: false, edgeTap: true,
+          },
+          magazine: {
+            preset: 'magazine', theme: 'snow', layout: 'essay', fontFamily: 'sans', fontSize: 18,
+            lineHeight: 1.8, pageWidth: 'wide', letterSpacing: 0.015, paragraphSpacing: 1.05,
+            immersive: false, chapterOpener: true, bookCover: true, edgeMeta: true, minimalDock: true,
+            focusMode: false, marginNotes: true, marginFootnotes: true, chapterRail: false,
+            sideRail: false, imageLayout: 'wide', writingMode: 'horizontal', thumbDock: false, edgeTap: true,
+          },
+          minimal: {
+            preset: 'minimal', theme: 'paper', layout: 'page', fontFamily: 'serif', fontSize: 19,
+            lineHeight: 1.9, pageWidth: 'comfortable', letterSpacing: 0.02, paragraphSpacing: 0.9,
+            immersive: true, chapterOpener: false, bookCover: false, edgeMeta: false, minimalDock: true,
+            focusMode: false, marginNotes: false, marginFootnotes: false, chapterRail: false,
+            sideRail: false, imageLayout: 'inline', writingMode: 'horizontal', thumbDock: false, edgeTap: true,
+          },
+          night: {
+            preset: 'night', theme: 'night', layout: 'page', fontFamily: 'serif', fontSize: 19,
+            lineHeight: 1.95, pageWidth: 'comfortable', letterSpacing: 0.02, paragraphSpacing: 0.9,
+            immersive: false, chapterOpener: true, bookCover: true, edgeMeta: true, minimalDock: true,
+            focusMode: false, marginNotes: false, marginFootnotes: false, chapterRail: false,
+            sideRail: false, imageLayout: 'inline', writingMode: 'horizontal', thumbDock: false, edgeTap: true,
+          },
+        };
+        function applyPreset(name) {
+          const next = presetSettings[name];
+          if (next) applySettings(next);
+        }
         const appearancePanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
@@ -2756,10 +2806,26 @@
         const layoutPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('readingPreset')),
+            ),
+            h('div', { className: 'sr-segment sr-segment--wide' },
+              ['classic', 'magazine', 'minimal', 'night'].map(function preset(name) {
+                return h('button', {
+                  key: name,
+                  type: 'button',
+                  'aria-pressed': settings.preset === name,
+                  onClick: function pick() { applyPreset(name); },
+                  style: { flex: 1 },
+                }, t('preset' + name.charAt(0).toUpperCase() + name.slice(1)));
+              }),
+            ),
+          ),
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
               h('span', null, t('readingLayout')),
             ),
             h('div', { className: 'sr-segment sr-segment--wide' },
-              [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'scroll', key: 'layoutScroll' }].map(function option(item) {
+              [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'essay', key: 'layoutEssay' }, { value: 'scroll', key: 'layoutScroll' }].map(function option(item) {
                 return h('button', {
                   key: item.value,
                   type: 'button',
@@ -2771,6 +2837,40 @@
             ),
             h('p', { className: 'sr-settings-hint' }, t('layoutModeHint')),
           ),
+          h('div', { className: 'sr-settings-section sr-layout-inline-row' },
+            h('div', { className: 'sr-type-field' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('imageLayout'))),
+              h('div', { className: 'sr-segment' },
+                [{ value: 'inline', key: 'imageLayoutInline' }, { value: 'wide', key: 'imageLayoutWide' }, { value: 'margin', key: 'imageLayoutMargin' }].map(function option(item) {
+                  return h('button', {
+                    key: item.value,
+                    type: 'button',
+                    'aria-pressed': (settings.imageLayout || 'inline') === item.value,
+                    onClick: function pick() { applySettings({ imageLayout: item.value }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
+              ),
+            ),
+            h('div', { className: 'sr-type-field' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('writingMode'))),
+              h('div', { className: 'sr-segment' },
+                h('button', {
+                  type: 'button',
+                  'aria-pressed': (settings.writingMode || 'horizontal') !== 'vertical',
+                  onClick: function horizontal() { applySettings({ writingMode: 'horizontal' }); },
+                  style: { flex: 1 },
+                }, t('writingHorizontal')),
+                h('button', {
+                  type: 'button',
+                  'aria-pressed': settings.writingMode === 'vertical',
+                  onClick: function vertical() { applySettings({ writingMode: 'vertical', layout: 'scroll' }); },
+                  style: { flex: 1 },
+                }, t('writingVertical')),
+              ),
+            ),
+          ),
+          h('p', { className: 'sr-settings-hint', style: { marginTop: '0' } }, t('writingModeHint')),
           h('div', { className: 'sr-settings-list' },
             readingRow({
               id: 'immersive', label: t('immersive'), hint: t('immersiveHint'),
@@ -2783,9 +2883,29 @@
               onToggle: function toggleOpener() { applySettings({ chapterOpener: settings.chapterOpener === false }); },
             }),
             readingRow({
+              id: 'book-cover', label: t('bookCover'), hint: t('bookCoverHint'),
+              checked: settings.bookCover !== false,
+              onToggle: function toggleCover() { applySettings({ bookCover: settings.bookCover === false }); },
+            }),
+            readingRow({
               id: 'edge-meta', label: t('edgeMeta'), hint: t('edgeMetaHint'),
               checked: settings.edgeMeta !== false,
               onToggle: function toggleEdgeMeta() { applySettings({ edgeMeta: settings.edgeMeta === false }); },
+            }),
+            readingRow({
+              id: 'chapter-rail', label: t('chapterRail'), hint: t('chapterRailHint'),
+              checked: settings.chapterRail === true,
+              onToggle: function toggleRail() { applySettings({ chapterRail: !settings.chapterRail }); },
+            }),
+            readingRow({
+              id: 'margin-notes', label: t('marginNotes'), hint: t('marginNotesHint'),
+              checked: settings.marginNotes === true,
+              onToggle: function toggleMarginNotes() { applySettings({ marginNotes: !settings.marginNotes }); },
+            }),
+            readingRow({
+              id: 'margin-footnotes', label: t('marginFootnotes'), hint: t('marginFootnotesHint'),
+              checked: settings.marginFootnotes === true,
+              onToggle: function toggleMarginFootnotes() { applySettings({ marginFootnotes: !settings.marginFootnotes }); },
             }),
             readingRow({
               id: 'focus-mode', label: t('focusMode'), hint: t('focusModeHint'),
@@ -2795,12 +2915,22 @@
             readingRow({
               id: 'side-rail', label: t('sideRail'), hint: t('sideRailHint'),
               checked: settings.sideRail === true,
-              onToggle: function toggleRail() { applySettings({ sideRail: !settings.sideRail }); },
+              onToggle: function toggleSideRail() { applySettings({ sideRail: !settings.sideRail }); },
             }),
             readingRow({
               id: 'minimal-dock', label: t('minimalDock'), hint: t('minimalDockHint'),
               checked: settings.minimalDock !== false,
               onToggle: function toggleDock() { applySettings({ minimalDock: settings.minimalDock === false }); },
+            }),
+            readingRow({
+              id: 'thumb-dock', label: t('thumbDock'), hint: t('thumbDockHint'),
+              checked: settings.thumbDock === true,
+              onToggle: function toggleThumbDock() { applySettings({ thumbDock: !settings.thumbDock }); },
+            }),
+            readingRow({
+              id: 'edge-tap', label: t('edgeTap'), hint: t('edgeTapHint'),
+              checked: settings.edgeTap !== false,
+              onToggle: function toggleEdgeTap() { applySettings({ edgeTap: settings.edgeTap === false }); },
             }),
           ),
         );
@@ -3153,6 +3283,25 @@
       }
 
       function chapterOpenNode() {
+        if (settings.bookCover !== false && chapterIndex === 0) {
+          const cover = book.cover || {};
+          return h('section', {
+            className: 'sr-book-cover',
+            style: cover.from ? {
+              '--sr-cover-from': cover.from,
+              '--sr-cover-to': cover.to || cover.from,
+              '--sr-cover-ink': cover.ink || '#f7f1e4',
+              '--sr-cover-accent': cover.accent || '#d9b980',
+            } : undefined,
+          },
+            h('span', { className: 'sr-book-cover-kicker' }, 'SHIGUANG READER'),
+            h('span', { className: 'sr-book-cover-title' }, book.title),
+            book.author ? h('span', { className: 'sr-book-cover-author' }, book.author) : null,
+            cover.glyph ? h('span', { className: 'sr-book-cover-glyph', 'aria-hidden': 'true' }, cover.glyph) : null,
+            h('span', { className: 'sr-book-cover-rule', 'aria-hidden': 'true' }),
+            h('span', { className: 'sr-book-cover-foot' }, fill(t('chapterIndex'), { n: 1 })),
+          );
+        }
         if (settings.chapterOpener !== false) {
           return h('section', { className: 'sr-chapter-opener' },
             h('span', { className: 'sr-chapter-opener-book' }, book.title),
@@ -3201,8 +3350,10 @@
       function handleScroll(event) {
         if (!scrollMode) return;
         const element = event.currentTarget;
-        const max = Math.max(0, element.scrollHeight - element.clientHeight);
-        const ratio = max > 0 ? clamp(element.scrollTop / max, 0, 1) : 0;
+        const vertical = settings.writingMode === 'vertical';
+        const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+        const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+        const ratio = max > 0 ? clamp(position / max, 0, 1) : 0;
         setScrollRatio(ratio);
         currentPercentRef.current = ratio;
       }
@@ -3231,6 +3382,11 @@
         'data-theme': activeThemeId,
         'data-page-width': settings.pageWidth,
         'data-layout': settings.layout || 'page',
+        'data-image-layout': settings.imageLayout || 'inline',
+        'data-writing-mode': settings.writingMode === 'vertical' ? 'vertical' : 'horizontal',
+        'data-margin-notes': settings.marginNotes === true ? 'true' : 'false',
+        'data-chapter-rail': settings.chapterRail === true ? 'true' : 'false',
+        'data-thumb-dock': settings.thumbDock === true ? 'true' : 'false',
         'data-minimal-dock': settings.minimalDock !== false ? 'true' : 'false',
         'data-tts': tts.status === 'idle' ? 'false' : 'true',
         ref: readerRef,
@@ -3258,6 +3414,52 @@
         (!chrome && settings.edgeMeta !== false) ? h('div', { className: 'sr-edge-meta', 'aria-hidden': 'true' },
           h('span', { className: 'sr-edge-book' }, book.title),
           h('span', { className: 'sr-edge-chapter' }, chapter.title + ' · ' + pageLabel),
+        ) : null,
+        (settings.marginNotes === true && typeof window !== 'undefined' && window.innerWidth >= 1180) ? h('aside', { className: 'sr-margin-notes', 'aria-label': t('marginNotes') },
+          h('div', { className: 'sr-margin-notes-head' },
+            h('span', null, t('marginNotes')),
+            h('small', null, String(chapterHighlights.length + chapterBookmarks.length)),
+          ),
+          chapterHighlights.length
+            ? chapterHighlights.slice(0, 7).map(function marginNote(note) {
+                return h('button', {
+                  key: note.id,
+                  type: 'button',
+                  className: 'sr-margin-note',
+                  onClick: function jump() { jumpToHighlight(note); },
+                },
+                  h('span', { className: 'sr-margin-note-mark' }),
+                  h('p', null, note.text),
+                  note.note ? h('small', null, note.note) : null,
+                );
+              })
+            : h('p', { className: 'sr-margin-empty' }, t('noHighlights')),
+          chapterBookmarks.length ? h('div', { className: 'sr-margin-bookmarks' },
+            chapterBookmarks.map(function marginBookmark(item) {
+              return h('button', {
+                key: item.id,
+                type: 'button',
+                className: 'sr-margin-bookmark',
+                onClick: function jump() { goChapter(item.chapterIndex, 'percent', item.percent); },
+              }, h(Icon, { name: 'bookmark', size: 10 }), h('span', null, item.chapterTitle || chapter.title));
+            }),
+          ) : null,
+        ) : null,
+        (settings.chapterRail === true && chapters.length > 1) ? h('nav', { className: 'sr-chapter-rail', 'aria-label': t('readerToc') },
+          chapters.map(function railChapter(item, index) {
+            return h('button', {
+              key: item.id || index,
+              type: 'button',
+              className: 'sr-chapter-rail-node',
+              'data-active': index === chapterIndex ? 'true' : 'false',
+              title: item.title,
+              'aria-label': item.title,
+              onClick: function jump() { goChapter(index, 'resume'); },
+            },
+              h('span', { className: 'sr-chapter-rail-dot' }),
+              h('span', { className: 'sr-chapter-rail-label' }, String(index + 1)),
+            );
+          }),
         ) : null,
         h('header', { className: 'sr-reader-top' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-top-left' },
@@ -3477,6 +3679,9 @@
         }, settings.immersive ? pageLabel : (clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel)) : null,
         h('div', { className: 'sr-reader-bottom' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-bottom-inner' },
+            settings.thumbDock ? h('button', { type: 'button', className: 'sr-reader-tool sr-thumb-nav', onClick: function prev() { prevPage(); }, title: t('prevPage'), 'aria-label': t('prevPage') },
+              h(Icon, { name: 'chevron-left', size: 15 }),
+            ) : null,
             h('button', { type: 'button', className: 'sr-reader-tool', onClick: function toc() { setDrawer('toc'); }, title: t('readerToc') },
               h(Icon, { name: 'list', size: 14 }),
               h('span', null, t('readerToc')),
@@ -3595,6 +3800,9 @@
               h(Icon, { name: 'type', size: 14 }),
               h('span', null, t('readerSettings')),
             ),
+            settings.thumbDock ? h('button', { type: 'button', className: 'sr-reader-tool sr-thumb-nav', onClick: function next() { nextPage(); }, title: t('nextPage'), 'aria-label': t('nextPage') },
+              h(Icon, { name: 'chevron-right', size: 15 }),
+            ) : null,
           ),
         ),
         tts.status !== 'idle' ? h('div', {
@@ -3810,7 +4018,7 @@
         footnote ? h('div', {
           role: 'dialog',
           'aria-label': t('footnote'),
-          className: 'sr-footnote-popover',
+          className: 'sr-footnote-popover' + (settings.marginFootnotes ? ' sr-footnote-popover--margin' : ''),
           style: {
             left: footnote.x + 'px',
             top: footnote.y + 'px',

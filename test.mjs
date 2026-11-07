@@ -333,6 +333,8 @@ assert.deepEqual(plain(normalized.settings), {
   theme: 'paper', fontSize: 28, lineHeight: 1.5, fontFamily: 'serif',
   letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', autoHideChrome: false,
   immersive: false, layout: 'page', chapterOpener: true, edgeMeta: true, focusMode: false, sideRail: false, minimalDock: true,
+  marginNotes: false, marginFootnotes: false, chapterRail: false, bookCover: true,
+  imageLayout: 'inline', writingMode: 'horizontal', thumbDock: false, edgeTap: true, preset: 'classic',
   paperSound: false, highlightColor: 'amber', speechRate: 1, speechVoice: '',
   textAlign: 'justify', readingRuler: false,
 });
@@ -352,6 +354,16 @@ assert.equal(customLayout.settings.edgeMeta, false);
 assert.equal(customLayout.settings.focusMode, true);
 assert.equal(customLayout.settings.sideRail, true);
 assert.equal(customLayout.settings.minimalDock, false);
+const customLayout2 = T.normalizeState({ settings: { marginNotes: true, marginFootnotes: true, chapterRail: true, bookCover: false, imageLayout: 'margin', writingMode: 'vertical', thumbDock: true, edgeTap: false, preset: 'magazine' } });
+assert.equal(customLayout2.settings.marginNotes, true);
+assert.equal(customLayout2.settings.marginFootnotes, true);
+assert.equal(customLayout2.settings.chapterRail, true);
+assert.equal(customLayout2.settings.bookCover, false);
+assert.equal(customLayout2.settings.imageLayout, 'margin');
+assert.equal(customLayout2.settings.writingMode, 'vertical');
+assert.equal(customLayout2.settings.thumbDock, true);
+assert.equal(customLayout2.settings.edgeTap, false);
+assert.equal(customLayout2.settings.preset, 'magazine');
 assert.equal(T.normalizeState({ settings: { layout: 'bad' } }).settings.layout, 'page');
 assert.equal(T.normalizeState({ settings: { autoHideChrome: true } }).settings.autoHideChrome, true);
 assert.equal(T.normalizeState({ settings: { highlightColor: 'sky' } }).settings.highlightColor, 'sky');
