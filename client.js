@@ -589,25 +589,25 @@ window.__ModuleLoader__.load({
       readingLayout: '翻页方式',
       layoutModeHint: '双页适合宽屏，滚动适合长文。',
       immersive: '沉浸模式',
-      immersiveHint: '默认隐藏工具栏，靠近顶部或底部时浮现。',
+      immersiveHint: '默认隐藏，靠近边缘浮现。',
       chapterOpener: '章节扉页',
-      chapterOpenerHint: '每章开头增加一页安静的标题页。',
+      chapterOpenerHint: '每章开头一页标题。',
       edgeMeta: '页边信息',
-      edgeMetaHint: '沉浸时在页边显示书名、章节和页码。',
+      edgeMetaHint: '沉浸时显示页边信息。',
       focusMode: '专注模式',
-      focusModeHint: '跟随光标弱化上下内容，只留一条清晰阅读带。',
+      focusModeHint: '只保留清晰阅读带。',
       sideRail: '左侧侧栏',
-      sideRailHint: '目录、笔记和搜索从左侧滑出。',
+      sideRailHint: '目录和笔记从左侧打开。',
       minimalDock: '极简底栏',
-      minimalDockHint: '底栏只保留进度、页码和必要图标。',
+      minimalDockHint: '底栏只留进度和必要图标。',
       marginNotes: '页边批注',
-      marginNotesHint: '在正文外侧固定显示本章笔记和书签。',
+      marginNotesHint: '页边显示本章笔记。',
       marginFootnotes: '页边脚注',
-      marginFootnotesHint: '脚注显示在页面右侧，而不是浮在文字上。',
+      marginFootnotesHint: '脚注显示在页边。',
       chapterRail: '章节进度轨',
-      chapterRailHint: '在页边显示章节节点和当前位置。',
+      chapterRailHint: '页边显示章节节点。',
       bookCover: '书级封面',
-      bookCoverHint: '第一章前增加整本书的封面页。',
+      bookCoverHint: '第一章前显示封面。',
       imageLayout: '图片布局',
       imageLayoutInline: '内嵌',
       imageLayoutWide: '通栏',
@@ -615,13 +615,20 @@ window.__ModuleLoader__.load({
       writingMode: '文字方向',
       writingHorizontal: '横排',
       writingVertical: '竖排',
-      writingModeHint: '竖排仅用于连续滚动，适合散文和诗词。',
+      writingModeHint: '竖排仅用于连续滚动。',
       thumbDock: '拇指底栏',
-      thumbDockHint: '手机端底部常驻翻页栏。',
+      thumbDockHint: '手机底部常驻翻页栏。',
       edgeTap: '边缘翻页',
-      edgeTapHint: '点击正文左右边缘翻页，中间呼出工具栏。',
+      edgeTapHint: '左右边缘点击翻页。',
       readingPreset: '版式预设',
       preset: '版式',
+      presetCustom: '自定义',
+      settingsSaved: '设置已保存',
+      resetThisPage: '恢复本页',
+      resetAllSettings: '全部恢复',
+      moreLayout: '更多布局',
+      fewerLayout: '收起布局',
+      viewAll: '查看全部',
       presetClassic: '精装',
       presetMagazine: '双栏',
       presetMinimal: '极简',
@@ -1441,6 +1448,13 @@ window.__ModuleLoader__.load({
       edgeTapHint: 'Tap the left or right edge to turn pages; tap the center for controls.',
       readingPreset: 'Layout preset',
       preset: 'Layout',
+      presetCustom: 'Custom',
+      settingsSaved: 'Saved',
+      resetThisPage: 'Reset this page',
+      resetAllSettings: 'Reset all',
+      moreLayout: 'More layout',
+      fewerLayout: 'Less layout',
+      viewAll: 'View all',
       presetClassic: 'Classic',
       presetMagazine: 'Essay',
       presetMinimal: 'Minimal',
@@ -3208,6 +3222,9 @@ body:has(.sr-reader) [data-rightbar-col]{
   position:relative;width:100%;height:100%;flex:1;min-height:0;overflow:hidden;
   background:var(--sr-bg);color:var(--sr-ink);
   --sr-bg:#f7f5ef;--sr-panel:#ffffff;--sr-ink:#1d2a23;--sr-muted:#6d7a72;--sr-line:rgba(31,58,47,.12);--sr-accent:#1f4d3d;--sr-wash:rgba(31,77,61,.09);
+  --sr-radius-xs:4px;--sr-radius-sm:6px;--sr-radius-md:10px;--sr-radius-lg:18px;
+  --sr-shadow-float:0 16px 38px -18px rgba(19,42,31,.24),0 2px 8px -4px rgba(19,42,31,.1);
+  --sr-shadow-drawer:0 28px 64px -24px rgba(19,42,31,.32);
   transition:background .25s ease,color .25s ease;
   isolation:isolate;
   box-sizing:border-box;
@@ -3525,22 +3542,24 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-ink
 .sr-margin-note p{margin:0;font-family:${SERIF_FONT};font-size:11px;line-height:1.65;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
 .sr-margin-note small{display:block;margin-top:4px;font-family:${UI_FONT};font-size:8.5px;line-height:1.5;color:var(--sr-muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .sr-margin-empty{margin:0;font-family:${UI_FONT};font-size:9px;line-height:1.6;color:var(--sr-muted);}
+.sr-margin-more{display:inline-flex;align-items:center;gap:4px;margin:0 0 10px;padding:0;border:0;background:transparent;color:var(--sr-muted);font-family:${UI_FONT};font-size:9px;cursor:pointer;}
+.sr-margin-more:hover{color:var(--sr-accent);}
 .sr-margin-bookmarks{margin-top:5px;display:flex;flex-direction:column;gap:5px;}
 .sr-margin-bookmark{display:flex;align-items:center;gap:6px;border:0;background:transparent;padding:0;color:var(--sr-muted);font-family:${UI_FONT};font-size:9px;text-align:left;cursor:pointer;}
 .sr-margin-bookmark:hover{color:var(--sr-accent);}
 .sr-reader[data-margin-notes="true"] .sr-page-area{padding-right:300px;}
 .sr-reader[data-margin-notes="true"] .sr-stage{max-width:760px !important;}
 .sr-reader[data-margin-notes="true"] .sr-chapter-rail{display:none;}
-.sr-chapter-rail{position:absolute;z-index:12;right:17px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;align-items:center;}
+.sr-chapter-rail{position:absolute;z-index:12;right:17px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:8px;align-items:center;max-height:58vh;overflow-y:auto;scrollbar-width:none;}
+.sr-chapter-rail::-webkit-scrollbar{display:none;}
 .sr-chapter-rail-node{display:flex;align-items:center;gap:5px;border:0;background:transparent;padding:0;cursor:pointer;color:var(--sr-muted);}
 .sr-chapter-rail-dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.45;transition:all .15s ease;}
-.sr-chapter-rail-label{font-family:${UI_FONT};font-size:8px;font-variant-numeric:tabular-nums;max-width:0;overflow:hidden;opacity:0;transition:all .15s ease;}
-.sr-chapter-rail-node:hover .sr-chapter-rail-label{max-width:20px;opacity:.7;}
+.sr-chapter-rail-label{font-family:${UI_FONT};font-size:8px;font-variant-numeric:tabular-nums;max-width:16px;overflow:hidden;opacity:.42;transition:all .15s ease;}
+.sr-chapter-rail-node:hover .sr-chapter-rail-label{max-width:20px;opacity:.85;}
 .sr-chapter-rail-node[data-active="true"]{color:var(--sr-accent);}
 .sr-chapter-rail-node[data-active="true"] .sr-chapter-rail-dot{width:8px;height:8px;opacity:1;box-shadow:0 0 0 3px color-mix(in srgb,var(--sr-accent) 14%,transparent);}
 .sr-reader[data-chapter-rail="true"] .sr-page-edge{display:none;}
-.sr-footnote-popover--margin{position:absolute !important;left:auto !important;right:30px !important;top:90px !important;bottom:auto !important;transform:none !important;width:230px !important;max-width:230px !important;}
-.sr-reader[data-margin-notes="true"] .sr-footnote-popover--margin{right:286px !important;}
+.sr-footnote-popover--margin{position:fixed !important;width:230px !important;max-width:230px !important;max-height:min(280px,50vh) !important;}
 .sr-reader[data-image-layout="wide"] .sr-figure{width:calc(100% + 96px);max-width:none;margin-left:-48px;}
 .sr-reader[data-image-layout="margin"] .sr-figure{float:right;width:44%;margin:.35em 0 .9em 1.2em;}
 .sr-thumb-nav{display:none;}
@@ -4178,9 +4197,25 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-ink
 .sr-settings-sheet{
   left:auto;right:18px;top:50%;bottom:auto;transform:translateY(-50%);
   width:min(520px,calc(100% - 32px));max-height:calc(100% - 32px);
-  padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:20px;
+  padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:var(--sr-radius-lg);
+  box-shadow:var(--sr-shadow-drawer);
   animation:sr-settings-side .24s cubic-bezier(.16,1,.3,1) both;
 }
+.sr-layout-more{
+  appearance:none;display:flex;align-items:center;justify-content:space-between;gap:8px;
+  width:100%;margin:12px 0 0;padding:9px 0;border:0;border-top:1px solid color-mix(in srgb,var(--sr-line) 72%,transparent);
+  border-bottom:1px solid color-mix(in srgb,var(--sr-line) 72%,transparent);
+  background:transparent;color:var(--sr-muted);font-family:${UI_FONT};font-size:9.5px;
+  letter-spacing:.08em;text-transform:uppercase;cursor:pointer;
+}
+.sr-layout-more:hover{color:var(--sr-ink);}
+.sr-layout-more svg{transition:transform .16s ease;}
+.sr-layout-more[aria-expanded="true"] svg{transform:rotate(180deg);}
+
+.sr-settings-foot-actions{display:flex;align-items:center;gap:14px;}
+.sr-settings-sheet .sr-sheet-note{min-height:1em;opacity:0;transition:opacity .18s ease,color .18s ease;}
+.sr-settings-sheet .sr-sheet-note.is-visible{opacity:1;color:var(--sr-accent);}
+
 @keyframes sr-settings-side{from{opacity:0;transform:translate(14px,-50%);}to{opacity:1;transform:translate(0,-50%);}}
 .sr-settings-sheet::before{
   content:"";display:block;width:32px;height:3px;border-radius:2px;flex:none;
@@ -4213,7 +4248,7 @@ button.sr-reader-top-center-copy:hover{background:color-mix(in srgb,var(--sr-ink
 .sr-settings-tab[aria-selected="true"]{color:var(--sr-ink);border-bottom-color:var(--sr-accent);font-weight:650;}
 .sr-settings-tab:focus-visible{outline:2px solid var(--sr-accent);outline-offset:2px;border-radius:3px;}
 .sr-settings-panel{
-  flex:1;min-height:280px;max-height:min(420px,calc(100vh - 280px));
+  flex:1;min-height:280px;max-height:min(470px,calc(100vh - 260px));
   overflow-y:auto;padding:16px 22px 4px;
 }
 .sr-tab-page{animation:sr-fade .15s ease;}
@@ -4726,7 +4761,7 @@ aside.sr-aside-note{
   .sr-reader-time{display:none;}
   .sr-reader-top-center strong{font-size:12px;}
   .sr-reader-back span{display:none;}
-  .sr-reader-bottom{min-height:38px;padding:0 10px;}
+  .sr-reader-bottom{min-height:38px;padding:0 10px env(safe-area-inset-bottom,0px);}
   .sr-reader-bottom-inner{gap:5px;padding:4px 0 5px;}
   .sr-reader[data-thumb-dock="true"] .sr-reader-bottom.is-hidden{opacity:1;pointer-events:auto;transform:none;}
   .sr-reader[data-thumb-dock="true"] .sr-thumb-nav{display:inline-flex;width:28px;justify-content:center;padding:0;}
@@ -4816,6 +4851,7 @@ aside.sr-aside-note{
   .sr-setting-pair{grid-template-columns:1fr;}
 }
 @media (prefers-reduced-motion:reduce){
+  .sr-settings-sheet,.sr-sheet,.sr-reader-top,.sr-reader-bottom,.sr-drawer,.sr-tab-page{animation:none !important;transition:none !important;}
   .sr-app *,.sr-app *::before,.sr-app *::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important;}
   .sr-page-track{transition:none !important;}
 }
@@ -15530,6 +15566,8 @@ aside.sr-aside-note{
       const [searchScope, setSearchScope] = useState('book');
       const [settingsOpen, setSettingsOpen] = useState(false);
       const [settingsTab, setSettingsTab] = useState('appearance');
+      const [layoutAdvanced, setLayoutAdvanced] = useState(false);
+      const [savedPulse, setSavedPulse] = useState(false);
       const [helpOpen, setHelpOpen] = useState(false);
       const [helpCategory, setHelpCategory] = useState('all');
       const [helpQuery, setHelpQuery] = useState('');
@@ -15580,6 +15618,9 @@ aside.sr-aside-note{
       const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
       const sleepTimerRef = useRef(null);
       const fontHudTimerRef = useRef(null);
+      const savedPulseTimerRef = useRef(null);
+      const settingsPanelRef = useRef(null);
+      const settingsReturnFocusRef = useRef(null);
       const chapterHudTimerRef = useRef(null);
       const sessionStartRef = useRef(Date.now());
       const sessionSecondsRef = useRef(0);
@@ -15843,11 +15884,21 @@ aside.sr-aside-note{
       }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t, scrollMode, settings.writingMode]);
 
       const applySettings = useCallback(function update(patch) {
-        if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
+        const next = Object.prototype.hasOwnProperty.call(patch, 'preset')
+          ? patch
+          : Object.assign({ preset: 'custom' }, patch);
+        if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch ||
+            'layout' in patch || 'writingMode' in patch || 'bookCover' in patch || 'chapterOpener' in patch) {
           pendingRef.current = currentPercentRef.current;
           readyRef.current = false;
         }
-        props.onUpdateSettings(patch);
+        props.onUpdateSettings(next);
+        setSavedPulse(true);
+        if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        savedPulseTimerRef.current = window.setTimeout(function clearSaved() {
+          savedPulseTimerRef.current = null;
+          setSavedPulse(false);
+        }, 1400);
       }, [props.onUpdateSettings]);
 
       // A short-lived "Aa 20px" HUD so keyboard resizing is visible without opening a panel.
@@ -15901,6 +15952,28 @@ aside.sr-aside-note{
         };
       }, []);
 
+      useEffect(function clearSavedTimer() {
+        return function cleanup() {
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        };
+      }, []);
+
+      useEffect(function settingsFocusLifecycle() {
+        if (settingsOpen) {
+          settingsReturnFocusRef.current = document.activeElement;
+          const frame = window.requestAnimationFrame(function focusTab() {
+            const target = document.getElementById('sr-settings-tab-' + settingsTab);
+            if (target) target.focus();
+          });
+          return function cleanup() { window.cancelAnimationFrame(frame); };
+        }
+        const previous = settingsReturnFocusRef.current;
+        settingsReturnFocusRef.current = null;
+        if (previous && typeof previous.focus === 'function') {
+          try { previous.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
+        }
+        return undefined;
+      }, [settingsOpen]);
       useEffect(function focusReader() {
         if (readerRef.current) {
           try { readerRef.current.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
@@ -16040,6 +16113,12 @@ aside.sr-aside-note{
         }
         return function cleanup() { alive = false; };
       }, []);
+
+      useEffect(function resetSettingsScroll() {
+        if (!settingsOpen) return;
+        const panel = settingsPanelRef.current;
+        if (panel) panel.scrollTop = 0;
+      }, [settingsOpen, settingsTab]);
 
       useEffect(function enableAnimation() {
         if (animate) return undefined;
@@ -16814,8 +16893,8 @@ aside.sr-aside-note{
         }
         const rect = event.currentTarget.getBoundingClientRect();
         const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
-        if (ratio < 0.24) prevPage();
-        else if (ratio > 0.76) nextPage();
+        if (ratio < 0.12) prevPage();
+        else if (ratio > 0.88) nextPage();
         else setChrome(function toggle(value) { return !value; });
       }
 
@@ -18122,6 +18201,47 @@ aside.sr-aside-note{
           const next = presetSettings[name];
           if (next) applySettings(next);
         }
+        function resetCurrentTab() {
+          if (settingsTab === 'appearance') {
+            applySettings({ theme: 'paper', highlightColor: 'amber' });
+          } else if (settingsTab === 'typography') {
+            applySettings({ fontFamily: 'serif', fontSize: 19, lineHeight: 1.95, letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', textAlign: 'justify' });
+          } else if (settingsTab === 'layout') {
+            applySettings({
+              layout: 'page', immersive: false, chapterOpener: true, bookCover: true, edgeMeta: true,
+              chapterRail: false, marginNotes: false, marginFootnotes: false, focusMode: false,
+              sideRail: false, minimalDock: true, thumbDock: false, edgeTap: true,
+              imageLayout: 'inline', writingMode: 'horizontal',
+            });
+          } else {
+            applySettings({ autoHideChrome: false, paperSound: false, readingRuler: false, speechVoice: '' });
+          }
+        }
+        function resetAllSettings() {
+          applySettings(Object.assign({}, presetSettings.classic, {
+            highlightColor: 'amber', autoHideChrome: false, paperSound: false, readingRuler: false, speechVoice: '',
+          }));
+        }
+        function trapSettingsFocus(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setSettingsOpen(false);
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const focusables = Array.from(event.currentTarget.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+            .filter(function visible(element) { return element.offsetParent !== null; });
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
         const appearancePanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
@@ -18276,10 +18396,16 @@ aside.sr-aside-note{
             }),
           ),
         );
+        const compactViewport = typeof window !== 'undefined' && window.innerWidth < 760;
+        const wideViewport = typeof window !== 'undefined' && window.innerWidth >= 1180;
+        const layoutOptions = compactViewport
+          ? [{ value: 'page', key: 'layoutPage' }, { value: 'scroll', key: 'layoutScroll' }]
+          : [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'essay', key: 'layoutEssay' }, { value: 'scroll', key: 'layoutScroll' }];
         const layoutPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
               h('span', null, t('readingPreset')),
+              settings.preset === 'custom' ? h('em', null, t('presetCustom')) : null,
             ),
             h('div', { className: 'sr-segment sr-segment--wide' },
               ['classic', 'magazine', 'minimal', 'night'].map(function preset(name) {
@@ -18298,12 +18424,16 @@ aside.sr-aside-note{
               h('span', null, t('readingLayout')),
             ),
             h('div', { className: 'sr-segment sr-segment--wide' },
-              [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'essay', key: 'layoutEssay' }, { value: 'scroll', key: 'layoutScroll' }].map(function option(item) {
+              layoutOptions.map(function option(item) {
                 return h('button', {
                   key: item.value,
                   type: 'button',
                   'aria-pressed': (settings.layout || 'page') === item.value,
-                  onClick: function pick() { applySettings({ layout: item.value }); },
+                  onClick: function pick() {
+                    const patch = { layout: item.value };
+                    if (item.value !== 'scroll' && settings.writingMode === 'vertical') patch.writingMode = 'horizontal';
+                    applySettings(patch);
+                  },
                   style: { flex: 1 },
                 }, t(item.key));
               }),
@@ -18360,22 +18490,33 @@ aside.sr-aside-note{
               checked: settings.bookCover !== false,
               onToggle: function toggleCover() { applySettings({ bookCover: settings.bookCover === false }); },
             }),
+          ),
+          h('button', {
+            type: 'button',
+            className: 'sr-layout-more',
+            'aria-expanded': layoutAdvanced ? 'true' : 'false',
+            onClick: function toggleAdvanced() { setLayoutAdvanced(!layoutAdvanced); },
+          },
+            h('span', null, layoutAdvanced ? t('fewerLayout') : t('moreLayout')),
+            h(Icon, { name: 'chevron-down', size: 13 }),
+          ),
+          layoutAdvanced ? h('div', { className: 'sr-settings-list' },
             readingRow({
               id: 'edge-meta', label: t('edgeMeta'), hint: t('edgeMetaHint'),
               checked: settings.edgeMeta !== false,
               onToggle: function toggleEdgeMeta() { applySettings({ edgeMeta: settings.edgeMeta === false }); },
             }),
-            readingRow({
+            (!compactViewport && !settings.marginNotes && chapters.length > 1) ? readingRow({
               id: 'chapter-rail', label: t('chapterRail'), hint: t('chapterRailHint'),
               checked: settings.chapterRail === true,
               onToggle: function toggleRail() { applySettings({ chapterRail: !settings.chapterRail }); },
-            }),
-            readingRow({
+            }) : null,
+            wideViewport ? readingRow({
               id: 'margin-notes', label: t('marginNotes'), hint: t('marginNotesHint'),
               checked: settings.marginNotes === true,
               onToggle: function toggleMarginNotes() { applySettings({ marginNotes: !settings.marginNotes }); },
-            }),
-            readingRow({
+            }) : null,
+            compactViewport ? null : readingRow({
               id: 'margin-footnotes', label: t('marginFootnotes'), hint: t('marginFootnotesHint'),
               checked: settings.marginFootnotes === true,
               onToggle: function toggleMarginFootnotes() { applySettings({ marginFootnotes: !settings.marginFootnotes }); },
@@ -18395,17 +18536,17 @@ aside.sr-aside-note{
               checked: settings.minimalDock !== false,
               onToggle: function toggleDock() { applySettings({ minimalDock: settings.minimalDock === false }); },
             }),
-            readingRow({
+            compactViewport ? readingRow({
               id: 'thumb-dock', label: t('thumbDock'), hint: t('thumbDockHint'),
               checked: settings.thumbDock === true,
               onToggle: function toggleThumbDock() { applySettings({ thumbDock: !settings.thumbDock }); },
-            }),
+            }) : null,
             readingRow({
               id: 'edge-tap', label: t('edgeTap'), hint: t('edgeTapHint'),
               checked: settings.edgeTap !== false,
               onToggle: function toggleEdgeTap() { applySettings({ edgeTap: settings.edgeTap === false }); },
             }),
-          ),
+          ) : null,
         );
         const readingPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-list' },
@@ -18460,7 +18601,7 @@ aside.sr-aside-note{
               : appearancePanel;
         return h(React.Fragment, null,
           h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
-          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
+          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings'), onKeyDown: trapSettingsFocus },
             h('div', { className: 'sr-settings-head' },
               h('div', { className: 'sr-settings-heading' },
                 h('span', { className: 'sr-settings-kicker' }, t('settingsKicker')),
@@ -18492,10 +18633,13 @@ aside.sr-aside-note{
                   tabIndex: settingsTab === item.id ? 0 : -1,
                   onClick: function select() { setSettingsTab(item.id); },
                   onKeyDown: function keys(event) {
-                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
                     event.preventDefault();
-                    const delta = event.key === 'ArrowRight' ? 1 : -1;
-                    const nextIndex = (index + delta + settingsTabs.length) % settingsTabs.length;
+                    const nextIndex = event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? settingsTabs.length - 1
+                        : (index + (event.key === 'ArrowRight' ? 1 : -1) + settingsTabs.length) % settingsTabs.length;
                     setSettingsTab(settingsTabs[nextIndex].id);
                     const parent = event.currentTarget.parentElement;
                     if (parent && parent.children[nextIndex]) parent.children[nextIndex].focus();
@@ -18504,33 +18648,26 @@ aside.sr-aside-note{
               }),
             ),
             h('div', {
+              ref: settingsPanelRef,
               className: 'sr-settings-panel',
               id: 'sr-settings-panel',
               role: 'tabpanel',
               'aria-labelledby': 'sr-settings-tab-' + settingsTab,
             }, panel),
             h('div', { className: 'sr-sheet-foot' },
-              h('button', {
-                type: 'button',
-                className: 'sr-text-btn',
-                onClick: function resetSettings() {
-                  applySettings({
-                    theme: 'paper',
-                    fontSize: 19,
-                    lineHeight: 1.95,
-                    fontFamily: 'serif',
-                    letterSpacing: 0.02,
-                    paragraphSpacing: 0.9,
-                    pageWidth: 'comfortable',
-                    textAlign: 'justify',
-                    autoHideChrome: false,
-                    paperSound: false,
-                    readingRuler: false,
-                  });
-                  props.showToast(t('settingsReset'));
-                },
-              }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetSettings'))),
-              h('p', { className: 'sr-sheet-note' }, t('savedLocally')),
+              h('div', { className: 'sr-settings-foot-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  onClick: resetCurrentTab,
+                }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetThisPage'))),
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  onClick: resetAllSettings,
+                }, h('span', null, t('resetAllSettings'))),
+              ),
+              h('p', { className: 'sr-sheet-note' + (savedPulse ? ' is-visible' : '') }, savedPulse ? t('settingsSaved') : ''),
             ),
           ),
         );
@@ -18894,7 +19031,7 @@ aside.sr-aside-note{
             h('small', null, String(chapterHighlights.length + chapterBookmarks.length)),
           ),
           chapterHighlights.length
-            ? chapterHighlights.slice(0, 7).map(function marginNote(note) {
+            ? chapterHighlights.slice(0, 6).map(function marginNote(note) {
                 return h('button', {
                   key: note.id,
                   type: 'button',
@@ -18907,6 +19044,11 @@ aside.sr-aside-note{
                 );
               })
             : h('p', { className: 'sr-margin-empty' }, t('noHighlights')),
+          (chapterHighlights.length + chapterBookmarks.length) > 6 ? h('button', {
+            type: 'button',
+            className: 'sr-margin-more',
+            onClick: function openAll() { setDrawer('notes'); },
+          }, h('span', null, t('viewAll')), h(Icon, { name: 'chevron-right', size: 10 })) : null,
           chapterBookmarks.length ? h('div', { className: 'sr-margin-bookmarks' },
             chapterBookmarks.map(function marginBookmark(item) {
               return h('button', {
@@ -18975,7 +19117,7 @@ aside.sr-aside-note{
               'aria-label': fill(t('openChapterTocHint'), { n: chapterIndex + 1 }),
               onClick: function toggleToc() { setDrawer(drawer === 'toc' ? null : 'toc'); },
             },
-              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + Math.round(progressPercentValue * 100) + '%'),
+              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + pageLabel),
               h('strong', null, chapter.title),
             ),
             h('button', {
@@ -19492,7 +19634,12 @@ aside.sr-aside-note{
           role: 'dialog',
           'aria-label': t('footnote'),
           className: 'sr-footnote-popover' + (settings.marginFootnotes ? ' sr-footnote-popover--margin' : ''),
-          style: {
+          style: settings.marginFootnotes ? {
+            left: 'auto',
+            right: (settings.marginNotes ? 286 : 30) + 'px',
+            top: Math.min(Math.max(footnote.y, 70), Math.max(70, (typeof window !== 'undefined' ? window.innerHeight : 900) - 300)) + 'px',
+            transform: 'none',
+          } : {
             left: footnote.x + 'px',
             top: footnote.y + 'px',
             transform: footnote.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',

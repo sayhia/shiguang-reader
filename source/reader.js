@@ -57,6 +57,8 @@
       const [searchScope, setSearchScope] = useState('book');
       const [settingsOpen, setSettingsOpen] = useState(false);
       const [settingsTab, setSettingsTab] = useState('appearance');
+      const [layoutAdvanced, setLayoutAdvanced] = useState(false);
+      const [savedPulse, setSavedPulse] = useState(false);
       const [helpOpen, setHelpOpen] = useState(false);
       const [helpCategory, setHelpCategory] = useState('all');
       const [helpQuery, setHelpQuery] = useState('');
@@ -107,6 +109,9 @@
       const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
       const sleepTimerRef = useRef(null);
       const fontHudTimerRef = useRef(null);
+      const savedPulseTimerRef = useRef(null);
+      const settingsPanelRef = useRef(null);
+      const settingsReturnFocusRef = useRef(null);
       const chapterHudTimerRef = useRef(null);
       const sessionStartRef = useRef(Date.now());
       const sessionSecondsRef = useRef(0);
@@ -370,11 +375,21 @@
       }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t, scrollMode, settings.writingMode]);
 
       const applySettings = useCallback(function update(patch) {
-        if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
+        const next = Object.prototype.hasOwnProperty.call(patch, 'preset')
+          ? patch
+          : Object.assign({ preset: 'custom' }, patch);
+        if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch ||
+            'layout' in patch || 'writingMode' in patch || 'bookCover' in patch || 'chapterOpener' in patch) {
           pendingRef.current = currentPercentRef.current;
           readyRef.current = false;
         }
-        props.onUpdateSettings(patch);
+        props.onUpdateSettings(next);
+        setSavedPulse(true);
+        if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        savedPulseTimerRef.current = window.setTimeout(function clearSaved() {
+          savedPulseTimerRef.current = null;
+          setSavedPulse(false);
+        }, 1400);
       }, [props.onUpdateSettings]);
 
       // A short-lived "Aa 20px" HUD so keyboard resizing is visible without opening a panel.
@@ -428,6 +443,28 @@
         };
       }, []);
 
+      useEffect(function clearSavedTimer() {
+        return function cleanup() {
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        };
+      }, []);
+
+      useEffect(function settingsFocusLifecycle() {
+        if (settingsOpen) {
+          settingsReturnFocusRef.current = document.activeElement;
+          const frame = window.requestAnimationFrame(function focusTab() {
+            const target = document.getElementById('sr-settings-tab-' + settingsTab);
+            if (target) target.focus();
+          });
+          return function cleanup() { window.cancelAnimationFrame(frame); };
+        }
+        const previous = settingsReturnFocusRef.current;
+        settingsReturnFocusRef.current = null;
+        if (previous && typeof previous.focus === 'function') {
+          try { previous.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
+        }
+        return undefined;
+      }, [settingsOpen]);
       useEffect(function focusReader() {
         if (readerRef.current) {
           try { readerRef.current.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
@@ -567,6 +604,12 @@
         }
         return function cleanup() { alive = false; };
       }, []);
+
+      useEffect(function resetSettingsScroll() {
+        if (!settingsOpen) return;
+        const panel = settingsPanelRef.current;
+        if (panel) panel.scrollTop = 0;
+      }, [settingsOpen, settingsTab]);
 
       useEffect(function enableAnimation() {
         if (animate) return undefined;
@@ -1341,8 +1384,8 @@
         }
         const rect = event.currentTarget.getBoundingClientRect();
         const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
-        if (ratio < 0.24) prevPage();
-        else if (ratio > 0.76) nextPage();
+        if (ratio < 0.12) prevPage();
+        else if (ratio > 0.88) nextPage();
         else setChrome(function toggle(value) { return !value; });
       }
 
@@ -2649,6 +2692,47 @@
           const next = presetSettings[name];
           if (next) applySettings(next);
         }
+        function resetCurrentTab() {
+          if (settingsTab === 'appearance') {
+            applySettings({ theme: 'paper', highlightColor: 'amber' });
+          } else if (settingsTab === 'typography') {
+            applySettings({ fontFamily: 'serif', fontSize: 19, lineHeight: 1.95, letterSpacing: 0.02, paragraphSpacing: 0.9, pageWidth: 'comfortable', textAlign: 'justify' });
+          } else if (settingsTab === 'layout') {
+            applySettings({
+              layout: 'page', immersive: false, chapterOpener: true, bookCover: true, edgeMeta: true,
+              chapterRail: false, marginNotes: false, marginFootnotes: false, focusMode: false,
+              sideRail: false, minimalDock: true, thumbDock: false, edgeTap: true,
+              imageLayout: 'inline', writingMode: 'horizontal',
+            });
+          } else {
+            applySettings({ autoHideChrome: false, paperSound: false, readingRuler: false, speechVoice: '' });
+          }
+        }
+        function resetAllSettings() {
+          applySettings(Object.assign({}, presetSettings.classic, {
+            highlightColor: 'amber', autoHideChrome: false, paperSound: false, readingRuler: false, speechVoice: '',
+          }));
+        }
+        function trapSettingsFocus(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setSettingsOpen(false);
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const focusables = Array.from(event.currentTarget.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+            .filter(function visible(element) { return element.offsetParent !== null; });
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
         const appearancePanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
@@ -2803,10 +2887,16 @@
             }),
           ),
         );
+        const compactViewport = typeof window !== 'undefined' && window.innerWidth < 760;
+        const wideViewport = typeof window !== 'undefined' && window.innerWidth >= 1180;
+        const layoutOptions = compactViewport
+          ? [{ value: 'page', key: 'layoutPage' }, { value: 'scroll', key: 'layoutScroll' }]
+          : [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'essay', key: 'layoutEssay' }, { value: 'scroll', key: 'layoutScroll' }];
         const layoutPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-section' },
             h('div', { className: 'sr-settings-section-head' },
               h('span', null, t('readingPreset')),
+              settings.preset === 'custom' ? h('em', null, t('presetCustom')) : null,
             ),
             h('div', { className: 'sr-segment sr-segment--wide' },
               ['classic', 'magazine', 'minimal', 'night'].map(function preset(name) {
@@ -2825,12 +2915,16 @@
               h('span', null, t('readingLayout')),
             ),
             h('div', { className: 'sr-segment sr-segment--wide' },
-              [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'essay', key: 'layoutEssay' }, { value: 'scroll', key: 'layoutScroll' }].map(function option(item) {
+              layoutOptions.map(function option(item) {
                 return h('button', {
                   key: item.value,
                   type: 'button',
                   'aria-pressed': (settings.layout || 'page') === item.value,
-                  onClick: function pick() { applySettings({ layout: item.value }); },
+                  onClick: function pick() {
+                    const patch = { layout: item.value };
+                    if (item.value !== 'scroll' && settings.writingMode === 'vertical') patch.writingMode = 'horizontal';
+                    applySettings(patch);
+                  },
                   style: { flex: 1 },
                 }, t(item.key));
               }),
@@ -2887,22 +2981,33 @@
               checked: settings.bookCover !== false,
               onToggle: function toggleCover() { applySettings({ bookCover: settings.bookCover === false }); },
             }),
+          ),
+          h('button', {
+            type: 'button',
+            className: 'sr-layout-more',
+            'aria-expanded': layoutAdvanced ? 'true' : 'false',
+            onClick: function toggleAdvanced() { setLayoutAdvanced(!layoutAdvanced); },
+          },
+            h('span', null, layoutAdvanced ? t('fewerLayout') : t('moreLayout')),
+            h(Icon, { name: 'chevron-down', size: 13 }),
+          ),
+          layoutAdvanced ? h('div', { className: 'sr-settings-list' },
             readingRow({
               id: 'edge-meta', label: t('edgeMeta'), hint: t('edgeMetaHint'),
               checked: settings.edgeMeta !== false,
               onToggle: function toggleEdgeMeta() { applySettings({ edgeMeta: settings.edgeMeta === false }); },
             }),
-            readingRow({
+            (!compactViewport && !settings.marginNotes && chapters.length > 1) ? readingRow({
               id: 'chapter-rail', label: t('chapterRail'), hint: t('chapterRailHint'),
               checked: settings.chapterRail === true,
               onToggle: function toggleRail() { applySettings({ chapterRail: !settings.chapterRail }); },
-            }),
-            readingRow({
+            }) : null,
+            wideViewport ? readingRow({
               id: 'margin-notes', label: t('marginNotes'), hint: t('marginNotesHint'),
               checked: settings.marginNotes === true,
               onToggle: function toggleMarginNotes() { applySettings({ marginNotes: !settings.marginNotes }); },
-            }),
-            readingRow({
+            }) : null,
+            compactViewport ? null : readingRow({
               id: 'margin-footnotes', label: t('marginFootnotes'), hint: t('marginFootnotesHint'),
               checked: settings.marginFootnotes === true,
               onToggle: function toggleMarginFootnotes() { applySettings({ marginFootnotes: !settings.marginFootnotes }); },
@@ -2922,17 +3027,17 @@
               checked: settings.minimalDock !== false,
               onToggle: function toggleDock() { applySettings({ minimalDock: settings.minimalDock === false }); },
             }),
-            readingRow({
+            compactViewport ? readingRow({
               id: 'thumb-dock', label: t('thumbDock'), hint: t('thumbDockHint'),
               checked: settings.thumbDock === true,
               onToggle: function toggleThumbDock() { applySettings({ thumbDock: !settings.thumbDock }); },
-            }),
+            }) : null,
             readingRow({
               id: 'edge-tap', label: t('edgeTap'), hint: t('edgeTapHint'),
               checked: settings.edgeTap !== false,
               onToggle: function toggleEdgeTap() { applySettings({ edgeTap: settings.edgeTap === false }); },
             }),
-          ),
+          ) : null,
         );
         const readingPanel = h('div', { className: 'sr-tab-page' },
           h('div', { className: 'sr-settings-list' },
@@ -2987,7 +3092,7 @@
               : appearancePanel;
         return h(React.Fragment, null,
           h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
-          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
+          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings'), onKeyDown: trapSettingsFocus },
             h('div', { className: 'sr-settings-head' },
               h('div', { className: 'sr-settings-heading' },
                 h('span', { className: 'sr-settings-kicker' }, t('settingsKicker')),
@@ -3019,10 +3124,13 @@
                   tabIndex: settingsTab === item.id ? 0 : -1,
                   onClick: function select() { setSettingsTab(item.id); },
                   onKeyDown: function keys(event) {
-                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
                     event.preventDefault();
-                    const delta = event.key === 'ArrowRight' ? 1 : -1;
-                    const nextIndex = (index + delta + settingsTabs.length) % settingsTabs.length;
+                    const nextIndex = event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? settingsTabs.length - 1
+                        : (index + (event.key === 'ArrowRight' ? 1 : -1) + settingsTabs.length) % settingsTabs.length;
                     setSettingsTab(settingsTabs[nextIndex].id);
                     const parent = event.currentTarget.parentElement;
                     if (parent && parent.children[nextIndex]) parent.children[nextIndex].focus();
@@ -3031,33 +3139,26 @@
               }),
             ),
             h('div', {
+              ref: settingsPanelRef,
               className: 'sr-settings-panel',
               id: 'sr-settings-panel',
               role: 'tabpanel',
               'aria-labelledby': 'sr-settings-tab-' + settingsTab,
             }, panel),
             h('div', { className: 'sr-sheet-foot' },
-              h('button', {
-                type: 'button',
-                className: 'sr-text-btn',
-                onClick: function resetSettings() {
-                  applySettings({
-                    theme: 'paper',
-                    fontSize: 19,
-                    lineHeight: 1.95,
-                    fontFamily: 'serif',
-                    letterSpacing: 0.02,
-                    paragraphSpacing: 0.9,
-                    pageWidth: 'comfortable',
-                    textAlign: 'justify',
-                    autoHideChrome: false,
-                    paperSound: false,
-                    readingRuler: false,
-                  });
-                  props.showToast(t('settingsReset'));
-                },
-              }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetSettings'))),
-              h('p', { className: 'sr-sheet-note' }, t('savedLocally')),
+              h('div', { className: 'sr-settings-foot-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  onClick: resetCurrentTab,
+                }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetThisPage'))),
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  onClick: resetAllSettings,
+                }, h('span', null, t('resetAllSettings'))),
+              ),
+              h('p', { className: 'sr-sheet-note' + (savedPulse ? ' is-visible' : '') }, savedPulse ? t('settingsSaved') : ''),
             ),
           ),
         );
@@ -3421,7 +3522,7 @@
             h('small', null, String(chapterHighlights.length + chapterBookmarks.length)),
           ),
           chapterHighlights.length
-            ? chapterHighlights.slice(0, 7).map(function marginNote(note) {
+            ? chapterHighlights.slice(0, 6).map(function marginNote(note) {
                 return h('button', {
                   key: note.id,
                   type: 'button',
@@ -3434,6 +3535,11 @@
                 );
               })
             : h('p', { className: 'sr-margin-empty' }, t('noHighlights')),
+          (chapterHighlights.length + chapterBookmarks.length) > 6 ? h('button', {
+            type: 'button',
+            className: 'sr-margin-more',
+            onClick: function openAll() { setDrawer('notes'); },
+          }, h('span', null, t('viewAll')), h(Icon, { name: 'chevron-right', size: 10 })) : null,
           chapterBookmarks.length ? h('div', { className: 'sr-margin-bookmarks' },
             chapterBookmarks.map(function marginBookmark(item) {
               return h('button', {
@@ -3502,7 +3608,7 @@
               'aria-label': fill(t('openChapterTocHint'), { n: chapterIndex + 1 }),
               onClick: function toggleToc() { setDrawer(drawer === 'toc' ? null : 'toc'); },
             },
-              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + Math.round(progressPercentValue * 100) + '%'),
+              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + pageLabel),
               h('strong', null, chapter.title),
             ),
             h('button', {
@@ -4019,7 +4125,12 @@
           role: 'dialog',
           'aria-label': t('footnote'),
           className: 'sr-footnote-popover' + (settings.marginFootnotes ? ' sr-footnote-popover--margin' : ''),
-          style: {
+          style: settings.marginFootnotes ? {
+            left: 'auto',
+            right: (settings.marginNotes ? 286 : 30) + 'px',
+            top: Math.min(Math.max(footnote.y, 70), Math.max(70, (typeof window !== 'undefined' ? window.innerHeight : 900) - 300)) + 'px',
+            transform: 'none',
+          } : {
             left: footnote.x + 'px',
             top: footnote.y + 'px',
             transform: footnote.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
