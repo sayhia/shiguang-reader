@@ -100,7 +100,7 @@ npm test        # 客户端 + 宿主测试
 dsh plugin --profile desktop add link:/path/to/shiguang-reader
 ```
 
-推送 `main` 时，GitHub Actions 会自动构建、跑测试，并在版本号尚未发布时推送 npm；已存在的版本自动跳过。
+推送 `main` 时，GitHub Actions 只会构建和跑测试，不会发布 npm。需要发布时，先更新版本并推送，再在 Actions 中手动运行 **Publish npm package**。
 
 ```bash
 npm version patch
