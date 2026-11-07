@@ -2455,6 +2455,8 @@
                 ),
               ),
             ),
+            h('div', { className: 'sr-sheet-body' },
+              h('div', { className: 'sr-setting-col' },
             h('div', { className: 'sr-setting-group' },
               h('div', { className: 'sr-setting-label' },
                 t('theme'),
@@ -2536,6 +2538,8 @@
                 ),
               ),
             ),
+              ),
+              h('div', { className: 'sr-setting-col' },
             h('div', { className: 'sr-setting-group' },
               h('div', { className: 'sr-setting-label' }, t('fontFamily')),
               h('div', { className: 'sr-segment', style: { width: '100%' } },
@@ -2679,6 +2683,8 @@
                   }),
                 )
                 : h('p', { className: 'sr-setting-hint' }, t('noVoices')),
+            ),
+              ),
             ),
             h('div', { className: 'sr-sheet-foot' },
               h('button', {
