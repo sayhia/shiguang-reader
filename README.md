@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/shiguang-reader.svg)](https://www.npmjs.com/package/shiguang-reader)
 [![Publish npm package](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml/badge.svg)](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 > 把世界关小一点，把书页放大一点。
 
@@ -111,3 +112,7 @@ git push origin main
 - 书库目录依赖 Chromium 的 File System Access API；Safari / Firefox 不支持导入。
 - EPUB 按纯文字阅读，不还原固定版式；不解析 PDF。
 - 截图使用演示数据，真实阅读数据保存在本机。
+
+## 许可证 · License
+
+本项目基于 [MIT License](LICENSE) 许可协议开源。

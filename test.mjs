@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, existsSync } from 'node:fs';
 import vm from 'node:vm';
 
 const root = new URL('./', import.meta.url);
@@ -21,6 +21,8 @@ const packageJson = JSON.parse(read('package.json'));
 const zhMeta = JSON.parse(read('locale/zh.json'));
 const enMeta = JSON.parse(read('locale/en.json'));
 assert.equal(packageJson.name, 'shiguang-reader');
+assert.equal(packageJson.license, 'MIT');
+assert.ok(existsSync(new URL('LICENSE', root)));
 assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml');
 assert.equal(packageJson.dsh.client.platform, 'web');
 assert.ok(zhMeta.meta.title && zhMeta.meta.description);
