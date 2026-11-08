@@ -220,6 +220,14 @@
       return h('span', { className: 'sr-book-last' }, fill(t(relative.key), { n: relative.n }));
     }
 
+    // Same wording as lastReadLabel but always returns text, so a card can keep a
+    // fixed-height last-read slot and every progress bar in a row lines up.
+    function lastReadInline(progress, t, fallback) {
+      const relative = lastReadRelative(progress && progress.updatedAt);
+      if (relative) return fill(t(relative.key), { n: relative.n });
+      return fallback || '';
+    }
+
     function BookCardComponent(props) {
       const book = props.book;
       const pct = progressPercent(book, props.progress);
@@ -248,11 +256,12 @@
       },
         h('div', { className: 'sr-book-cover-wrap' },
           h(Cover, { book: book, t: props.t, progress: pct }),
-          !selecting && props.onContinue ? h('button', {
-            type: 'button',
+          // A span, not a nested <button>: the card itself is the focusable control
+          // (Space continues reading), and nested buttons break Tab order.
+          !selecting && props.onContinue ? h('span', {
             className: 'sr-book-quick-read',
+            'aria-hidden': 'true',
             title: completed ? props.t('reread') : (pct > 0 ? props.t('continueReading') : props.t('readNow')),
-            'aria-label': completed ? props.t('reread') : (pct > 0 ? props.t('continueReading') : props.t('readNow')),
             onClick: function quickRead(e) {
               e.stopPropagation();
               e.preventDefault();
@@ -270,9 +279,11 @@
           ) : null,
           h('div', { className: 'sr-book-progress' },
             h('span', { className: 'sr-book-track' }, h('span', { className: 'sr-book-fill', style: { width: pct + '%' } })),
-            h('span', { className: 'sr-book-pct' }, completed ? props.t('finished') : (progressPercent(book, props.progress) > 0 ? pct + '%' : '')),
+            h('span', { className: 'sr-book-pct' }, completed ? props.t('finished') : (pct > 0 ? pct + '%' : '')),
           ),
-          lastReadLabel(props.progress, props.t),
+          h('span', { className: 'sr-book-last' },
+            lastReadInline(props.progress, props.t, props.progress ? '' : props.t('unread')),
+          ),
         ),
       );
     }
@@ -295,6 +306,14 @@
           if (selecting) { if (props.onSelect) props.onSelect(book, event); return; }
           props.onOpen(book);
         },
+        onKeyDown: function onKey(event) {
+          if (selecting) return;
+          if (event.key === ' ' && props.onContinue) {
+            event.preventDefault();
+            event.stopPropagation();
+            props.onContinue(book);
+          }
+        },
         'aria-label': book.title + ' · ' + book.author,
       },
         selecting ? h('span', { className: 'sr-book-check sr-book-check--row', 'aria-hidden': 'true' }, picked ? h(Icon, { name: 'check', size: 11 }) : null) : null,
@@ -314,11 +333,10 @@
           ),
         ),
         h('div', { className: 'sr-book-row-side' },
-          !selecting && props.onContinue ? h('button', {
-            type: 'button',
+          !selecting && props.onContinue ? h('span', {
             className: 'sr-book-row-read-btn',
+            'aria-hidden': 'true',
             title: completed ? props.t('reread') : (pct > 0 ? props.t('continueReading') : props.t('readNow')),
-            'aria-label': completed ? props.t('reread') : (pct > 0 ? props.t('continueReading') : props.t('readNow')),
             onClick: function quickRead(e) {
               e.stopPropagation();
               e.preventDefault();
@@ -346,8 +364,12 @@
       const t = props.t;
       const state = props.state;
       const books = props.books;
-      const [filter, setFilter] = useState('all');
-      const [tagFilters, setTagFilters] = useState(props.shelfTagFilter ? [props.shelfTagFilter] : []);
+      const [filter, setFilter] = useState(props.initialFilter || 'all');
+      const [tagFilters, setTagFilters] = useState(
+        props.shelfTagFilter
+          ? [props.shelfTagFilter]
+          : (Array.isArray(props.initialTagFilters) ? props.initialTagFilters : []),
+      );
       useEffect(function syncShelfTagFilter() {
         if (props.shelfTagFilter) {
           setFilter('all');
@@ -366,7 +388,12 @@
         }
         bookCountRef.current = books.length;
       }, [books.length]);
-      const [tagMatch, setTagMatch] = useState('any');
+      const [tagMatch, setTagMatch] = useState(props.initialTagMatch === 'all' ? 'all' : 'any');
+      useEffect(function publishShelfUi() {
+        if (typeof props.onShelfUiChange === 'function') {
+          props.onShelfUiChange({ filter: filter, tagFilters: tagFilters, tagMatch: tagMatch });
+        }
+      }, [filter, tagFilters, tagMatch]);
       const [tagManagerOpen, setTagManagerOpen] = useState(false);
       const [quoteOffset, setQuoteOffset] = useState(0);
       const [cardQuote, setCardQuote] = useState(null);
@@ -381,21 +408,6 @@
       const [deleteConfirm, setDeleteConfirm] = useState(false);
       const query = (props.query || '').trim().toLowerCase();
       const progress = state.progress || {};
-
-      useEffect(function searchBookText() {
-        const needle = (props.query || '').trim();
-        if (!needle) {
-          setContentResults([]);
-          setSearchingContent(false);
-          return undefined;
-        }
-        setSearchingContent(true);
-        const timer = window.setTimeout(function runSearch() {
-          setContentResults(searchLibraryBooks(books, needle, 6));
-          setSearchingContent(false);
-        }, 220);
-        return function cleanup() { window.clearTimeout(timer); };
-      }, [props.query, books]);
 
       const continueBook = useMemo(function calcContinue() {
         return resolveContinueBook(books, progress, state.shelved);
@@ -427,11 +439,9 @@
       }, [state.stats]);
       const weekly = weeklyStats.weekly;
       const weeklySeconds = weeklyStats.weeklySeconds;
-      const goalSeconds = weeklyStats.goalSeconds;
       const weeklyGoalRatio = weeklyStats.weeklyGoalRatio;
       const streak = weeklyStats.streak;
       const todayGoal = weeklyStats.todayGoal;
-      const goalRemain = weeklyStats.goalRemain;
 
       const dailyQuote = useMemo(function calcDailyQuote() {
         return pickDailyQuote(props.highlights, books, dayKey(), quoteOffset);
@@ -454,14 +464,15 @@
         return tagFilters.filter(function alive(tag) { return tagCounts.has(tag); });
       }, [tagFilters, tagCounts]);
 
-      const filtered = useMemo(function filterBooks() {
-        return books.filter(function filterBook(book) {
-          if (query) {
-            const haystack = (book.title + ' ' + book.author + ' ' + (book.tags || []).join(' ') + ' ' + ((props.userTags || {})[book.id] || []).join(' ')).toLowerCase();
-            if (haystack.indexOf(query) < 0) return false;
+      // The status chip and the tag picks narrow first. The query only narrows the
+      // visible grid; the in-text search runs over the same narrowed scope, so the
+      // chips, the card grid and the "正文匹配" list can never disagree.
+      const scopedBooks = useMemo(function filterScope() {
+        return books.filter(function filterScopedBook(book) {
+          if (filter === 'reading') {
+            const item = progress[book.id];
+            if (!item || item.completed || (state.shelved || []).indexOf(book.id) >= 0) return false;
           }
-          // The status chip and the tag picks narrow together: a status never bypasses the tags.
-          if (filter === 'reading' && !(Boolean(progress[book.id]) && !progress[book.id].completed)) return false;
           if (filter === 'finished' && !(progress[book.id] && progress[book.id].completed)) return false;
           if (filter === 'local' && book.source !== 'local') return false;
           if (filter === 'wishlist' && (state.wishlist || []).indexOf(book.id) < 0) return false;
@@ -473,7 +484,30 @@
           if (!matchBookTags(props.userTags || {}, book.id, liveTagFilters, tagMatch)) return false;
           return true;
         });
-      }, [books, query, filter, progress, state.wishlist, state.shelved, reviews, state.highlights, state.bookmarks, props.userTags, liveTagFilters, tagMatch]);
+      }, [books, filter, progress, state.wishlist, state.shelved, reviews, state.highlights, state.bookmarks, props.userTags, liveTagFilters, tagMatch]);
+
+      const filtered = useMemo(function filterBooks() {
+        if (!query) return scopedBooks;
+        return scopedBooks.filter(function filterBook(book) {
+          const haystack = (book.title + ' ' + book.author + ' ' + (book.tags || []).join(' ') + ' ' + ((props.userTags || {})[book.id] || []).join(' ')).toLowerCase();
+          return haystack.indexOf(query) >= 0;
+        });
+      }, [scopedBooks, query, props.userTags]);
+
+      useEffect(function searchBookText() {
+        const needle = (props.query || '').trim();
+        if (!needle) {
+          setContentResults([]);
+          setSearchingContent(false);
+          return undefined;
+        }
+        setSearchingContent(true);
+        const timer = window.setTimeout(function runSearch() {
+          setContentResults(searchLibraryBooks(scopedBooks, needle, 6));
+          setSearchingContent(false);
+        }, 220);
+        return function cleanup() { window.clearTimeout(timer); };
+      }, [props.query, scopedBooks]);
 
       const counts = useMemo(function calcCounts() {
         let reading = 0;
@@ -495,7 +529,7 @@
           const prog = progress[id];
           if (prog) {
             if (prog.completed) finished += 1;
-            else reading += 1;
+            else if (!shelvedSet.has(id)) reading += 1;
           }
           if (book.source === 'local') local += 1;
           if (wishlistSet.has(id)) wishlist += 1;
@@ -836,6 +870,10 @@
         });
       }
 
+      const libraryEmpty = books.length === 0;
+      const narrowed = Boolean(query) || filter !== 'all' || liveTagFilters.length > 0;
+      const todayGoalRemainSeconds = Math.max(0, todayGoal.targetSeconds - todayGoal.seconds);
+
       return h('div', null,
         !query ? h('section', { className: 'sr-hero-grid' },
           h('div', { className: 'sr-hero-main' },
@@ -873,6 +911,19 @@
                 className: 'sr-continue-go',
                 'aria-hidden': 'true',
               }, h(Icon, { name: 'arrow-right', size: 16 })),
+            ) : libraryEmpty ? h('button', {
+              type: 'button',
+              className: 'sr-continue-card sr-firstrun-card',
+              onClick: function firstRunImport() { props.onImport(); },
+              title: t('heroFirstRunTitle'),
+            },
+              h('span', { className: 'sr-firstrun-mark', 'aria-hidden': 'true' }, h(Icon, { name: 'upload', size: 22 })),
+              h('div', { className: 'sr-continue-info' },
+                h('span', { className: 'sr-continue-label' }, t('heroFirstRunLabel')),
+                h('span', { className: 'sr-continue-title' }, t('heroFirstRunTitle')),
+                h('span', { className: 'sr-continue-meta' }, t('heroFirstRunHint')),
+              ),
+              h('span', { className: 'sr-continue-go', 'aria-hidden': 'true' }, h(Icon, { name: 'arrow-right', size: 16 })),
             ) : null,
           ),
           h('aside', { className: 'sr-goal-card' },
@@ -945,17 +996,25 @@
           ),
         ) : null,
         h('div', { className: 'sr-greeting-line' },
-          h('h1', null, fullDateLabel() + ' · ' + t(greetingKey())),
-          h('span', null, t('weekGoal') + ' · ' + formatDuration(goalSeconds, t)),
+          h('p', { className: 'sr-greeting-text' },
+            h('time', { dateTime: dayKey() }, fullDateLabel()),
+            h('span', { className: 'sr-greeting-dot', 'aria-hidden': 'true' }, '·'),
+            h('span', null, t(greetingKey())),
+          ),
+          libraryEmpty ? null : h('span', { className: 'sr-greeting-goal' },
+            todayGoal.done
+              ? t('todayGoalDone')
+              : t('todayGoal') + ' · ' + fill(t('goalDailyRemain'), { n: Math.ceil(todayGoalRemainSeconds / 60) }),
+          ),
         ),
         h('section', null,
           h('div', { className: 'sr-section-head' },
             h('div', null,
-              h('h2', null, query ? t('searchAria') : t('shelfTitle')),
-              h('p', null, fill(t('shelfSubtitle'), { n: books.length })),
+              h(query ? 'h1' : 'h2', { className: 'sr-section-title' }, query ? t('searchAria') : t('shelfTitle')),
+              h('p', null, query ? t('shelfSearchHint') : t('shelfSubtitle')),
             ),
-            h('div', { className: 'sr-shelf-head-tools' },
-              h('span', { className: 'sr-count-chip' }, query ? filtered.length + ' / ' + books.length : t('bookCount', { n: books.length })),
+            libraryEmpty ? null : h('div', { className: 'sr-shelf-head-tools' },
+              narrowed ? h('span', { className: 'sr-count-chip', 'aria-live': 'polite' }, filtered.length + ' / ' + books.length) : null,
               h('button', {
                 type: 'button',
                 className: 'sr-icon-btn',
@@ -1020,7 +1079,7 @@
               ),
             ),
           ),
-          h('div', { className: 'sr-filter-row' },
+          libraryEmpty ? null : h('div', { className: 'sr-filter-row' },
             h('button', { type: 'button', className: 'sr-chip', 'aria-pressed': filter === 'all', onClick: function all() { setFilter('all'); setTagFilters([]); } },
               t('shelfAll'), h('span', { className: 'sr-chip-count' }, counts.all),
             ),
@@ -1309,10 +1368,10 @@
               }, h(Icon, { name: 'check', size: 13 }), h('span', null, t('done'))),
             ),
           ) : null,
-          query ? h('div', { className: 'sr-content-results' },
+          query && (contentResults.length || searchingContent || ordered.length) ? h('div', { className: 'sr-content-results' },
             h('div', { className: 'sr-content-head' },
               h('span', null, t('searchInContent')),
-              h('span', null, searchingContent ? t('searchingContent') : fill(t('searchResultCount'), { n: contentResults.length })),
+              h('span', { 'aria-live': 'polite' }, searchingContent ? t('searchingContent') : fill(t('searchResultCount'), { n: contentResults.length })),
             ),
             contentResults.length
               ? contentResults.map(function result(item) {
@@ -1440,18 +1499,38 @@
             : query && (contentResults.length || searchingContent)
               ? null
               : h(EmptyState, {
-                title: query ? t('noSearchTitle') : liveTagFilters.length ? t('tagFilterEmpty') : t('filterEmpty'),
+                title: query
+                  ? t('noSearchTitle')
+                  : libraryEmpty
+                    ? t('emptyShelfTitle')
+                    : liveTagFilters.length
+                      ? t('tagFilterEmpty')
+                      : t('filterEmpty'),
                 text: query
                   ? t('noSearchText')
-                  : liveTagFilters.length
-                    ? fill(t('tagFilterEmptyHint'), { tags: liveTagFilters.map(function hash(tag) { return '#' + tag; }).join(' ') })
-                    : t('emptyShelfText'),
+                  : libraryEmpty
+                    ? t('emptyShelfText')
+                    : liveTagFilters.length
+                      ? fill(t('tagFilterEmptyHint'), { tags: liveTagFilters.map(function hash(tag) { return '#' + tag; }).join(' ') })
+                      : t('filterEmptyHint'),
                 action: query
                   ? function clear() { props.onClearSearch(); }
-                  : liveTagFilters.length
-                    ? function clearTags() { setTagFilters([]); }
-                    : null,
-                actionLabel: query ? t('clearSearch') : liveTagFilters.length ? t('searchClear') : null,
+                  : libraryEmpty
+                    ? null
+                    : liveTagFilters.length
+                      ? function clearTags() { setTagFilters([]); }
+                      : filter !== 'all'
+                        ? function showAll() { setFilter('all'); }
+                        : null,
+                actionLabel: query
+                  ? t('clearSearch')
+                  : libraryEmpty
+                    ? null
+                    : liveTagFilters.length
+                      ? t('searchClear')
+                      : filter !== 'all'
+                        ? t('showAllBooks')
+                        : null,
               }),
           h('div', { className: 'sr-shelf-footer' },
             h('span', null, t('savedLocally')),

@@ -2708,7 +2708,7 @@
         },
         lastBookId: typeof raw.lastBookId === 'string' && knownIds.indexOf(raw.lastBookId) >= 0 ? raw.lastBookId : null,
         lastReadAt: Number.isFinite(raw.lastReadAt) ? raw.lastReadAt : 0,
-        shelfSort: ['recent', 'title', 'author', 'added', 'progress', 'rating'].indexOf(raw.shelfSort) >= 0 ? raw.shelfSort : 'recent',
+        shelfSort: ['recent', 'title', 'author', 'added', 'progress', 'rating', 'words'].indexOf(raw.shelfSort) >= 0 ? raw.shelfSort : 'recent',
         shelfView: ['grid', 'list', 'group'].indexOf(raw.shelfView) >= 0 ? raw.shelfView : 'grid',
         userTags: normalizeUserTags(raw.userTags, knownIds),
         wishlist: Array.isArray(raw.wishlist) ? Array.from(new Set(raw.wishlist.filter(function wish(id) { return typeof id === 'string' && knownIds.indexOf(id) >= 0; }))).slice(0, 200) : [],

@@ -2291,6 +2291,76 @@ assert.ok(!/function escapeTagManager/.test(read('source/notesview.js')), 'no du
   onKey({ key: 'Escape', defaultPrevented: false, preventDefault() {} });
   assert.deepEqual(plain(calls), [[]], 'a bare Escape leaves select mode');
 }
+
+// Homepage polish: the shelf page has exactly one h1 (the hero headline), and a
+// brand-new library leads with an import CTA instead of a dead end.
+{
+  const shelfTree = T.ShelfView(smokeShelfProps);
+  assert.equal(collectNodes(shelfTree, []).filter((node) => node.type === 'h1').length, 1, 'the shelf keeps a single h1');
+
+  const emptyState = Object.assign({}, smokeState, {
+    customBooks: [], progress: {}, highlights: [], bookmarks: [], reviews: {}, userTags: {},
+    wishlist: [], shelved: [], sessions: [], pins: [], lastBookId: null,
+    stats: { days: {}, goalMinutes: 180, byBook: {} },
+  });
+  const emptyTree = T.ShelfView(Object.assign({}, smokeShelfProps, { books: [], state: emptyState, highlights: [], userTags: {} }));
+  const emptyNodes = collectNodes(emptyTree, []);
+  const heroImport = emptyNodes.find((node) => typeof node.props.className === 'string' && node.props.className.indexOf('sr-firstrun-card') >= 0);
+  assert.ok(heroImport && heroImport.type === 'button', 'the first-run hero offers an import card');
+  assert.equal(typeof heroImport.props.onClick, 'function', 'the first-run hero card imports on click');
+  const emptyPanel = emptyNodes.find((node) => typeof node.type === 'function' && node.props.title === 'emptyShelfTitle');
+  assert.ok(emptyPanel, 'the empty shelf uses the first-run title');
+  assert.equal(emptyPanel.props.text, 'emptyShelfText', 'the empty shelf explains how to import');
+  assert.equal(emptyPanel.props.action, null, 'the hero card is the only first-run import CTA in the content');
+
+  // Parked (shelved) books count under 已搁置, not 在读, in both chips and the filtered grid.
+  const parkedBooks = [probeBook('pk-1', '甲'), probeBook('pk-2', '乙')];
+  const parkedTree = T.ShelfView(Object.assign({}, smokeShelfProps, {
+    books: parkedBooks,
+    state: Object.assign({}, smokeState, {
+      shelfView: 'grid', pins: [], shelfSort: 'title', wishlist: [], shelved: ['pk-1'],
+      progress: {
+        'pk-1': { chapterIndex: 0, percent: 0.2, completed: false, updatedAt: 2 },
+        'pk-2': { chapterIndex: 0, percent: 0.4, completed: false, updatedAt: 1 },
+      },
+    }),
+    userTags: {},
+  }));
+  const parkChip = collectNodes(parkedTree, []).filter((node) => node.props.className === 'sr-chip').find((node) => Array.isArray(node.props.children) && node.props.children[0] === 'shelfReading');
+  const shelvedChip = collectNodes(parkedTree, []).filter((node) => node.props.className === 'sr-chip').find((node) => Array.isArray(node.props.children) && node.props.children[0] === 'shelfShelved');
+  assert.ok(parkChip && shelvedChip, 'both status chips render');
+  assert.equal(parkChip.props.children[1].props.children, 1, '在读 excludes parked books');
+  assert.equal(shelvedChip.props.children[1].props.children, 1, '已搁置 counts the parked book');
+  assert.ok(!emptyNodes.some((node) => typeof node.props.className === 'string' && node.props.className.indexOf('sr-filter-row') >= 0), 'an empty shelf shows no status filters');
+  assert.ok(!emptyNodes.some((node) => typeof node.props.className === 'string' && node.props.className.indexOf('sr-shelf-head-tools') >= 0), 'an empty shelf shows no shelf tools');
+  assert.equal(collectNodes(emptyTree, []).filter((node) => node.type === 'h1').length, 1, 'the empty shelf keeps a single h1');
+}
+
+// Narrowed shelf: the count chip reports visible / total, and a search with no
+// book or text match shows one empty state instead of a second "0 matches" panel.
+{
+  const books = [probeBook('cp-1', '甲'), probeBook('cp-2', '乙')];
+  const counted = renderProbed(T.ShelfView, Object.assign({}, smokeShelfProps, {
+    books: books,
+    state: Object.assign({}, smokeState, { shelfView: 'grid', pins: [], shelfSort: 'title', progress: { 'cp-1': { chapterIndex: 0, percent: 0.3, updatedAt: 2 } } }),
+    userTags: {},
+  }), (value) => (value === 'all' ? ['reading', () => {}] : null));
+  const chip = collectNodes(counted, []).find((node) => typeof node.props.className === 'string' && node.props.className.indexOf('sr-count-chip') >= 0);
+  assert.equal(chip.props.children, '1 / 2', 'a filtered shelf reports visible / total');
+  const missing = collectNodes(T.ShelfView(Object.assign({}, smokeShelfProps, { query: 'zzz' })), []);
+  assert.ok(!missing.some((node) => typeof node.props.className === 'string' && node.props.className.indexOf('sr-content-results') >= 0), 'no empty match panel before any search result exists');
+  assert.ok(missing.some((node) => typeof node.type === 'function' && node.props.title === 'noSearchTitle'), 'the single search empty state remains');
+}
+
+// Homepage polish lives in the CSS structure too: shared card baselines and a
+// stacked shelf header on narrow screens.
+assert.match(read('source/styles.js'), /\.sr-book-progress\{margin-top:auto/, 'book progress rows share one baseline');
+assert.match(read('source/styles.js'), /\.sr-book-meta\{flex:1;display:flex;flex-direction:column/, 'book meta fills the stretched card');
+assert.match(read('source/styles.js'), /@media \(max-width:600px\)\{/, 'small screens stack the shelf header');
+assert.match(read('source/styles.js'), /\.sr-book-fill\{display:block/, 'book progress fills render (inline spans had zero width)');
+assert.match(read('source/styles.js'), /\.sr-continue-fill\{display:block/, 'the hero continue bar fills too');
+assert.ok(!read('source/styles.js').includes('outline: 2.5px solid #2b7fff'), 'focus ring follows the palette, not hardcoded blue');
+assert.match(read('source/app.js'), /h\('div', \{ className: 'sr-brand-title' \}/, 'the brand is not a second page-level h1');
 const estimateBook = {
   id: 'est-book', title: '估值之书', author: '测试', subtitle: '', source: 'builtin', tags: [],
   chapters: Array.from({ length: 10 }, (_, index) => ({ id: 'ec-' + index, title: '第' + (index + 1) + '章', paragraphs: ['正文'] })),

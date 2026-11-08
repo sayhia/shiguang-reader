@@ -133,6 +133,10 @@
       const readerRef = useRef(null);
       const [persistTick, setPersistTick] = useState(0);
       const scrollRef = useRef(null);
+      const shelfUiMemory = useRef({ filter: 'all', tagFilters: [], tagMatch: 'any' });
+      const shelfScrollMemory = useRef(0);
+      const tabRef = useRef(tab);
+      useEffect(function syncTabRef() { tabRef.current = tab; }, [tab]);
       const fileRef = useRef(null);
       const backupRef = useRef(null);
       const importingRef = useRef(false);
@@ -324,6 +328,14 @@
       useEffect(function resetScrollOnTab() {
         if (scrollRef.current) scrollRef.current.scrollTop = 0;
       }, [tab]);
+
+      useEffect(function rememberShelfScroll() {
+        const el = scrollRef.current;
+        if (!el || reader || tab !== 'shelf') return undefined;
+        const onScroll = function saveScroll() { shelfScrollMemory.current = el.scrollTop; };
+        el.addEventListener('scroll', onScroll, { passive: true });
+        return function cleanup() { el.removeEventListener('scroll', onScroll); };
+      }, [reader, tab]);
 
       useEffect(function collapseHostRightbarForReader() {
         if (!reader) return undefined;
@@ -535,6 +547,7 @@
 
       const openReader = useCallback(async function open(book, chapterIndex, percent) {
         if (!book) return;
+        if (tabRef.current === 'shelf' && scrollRef.current) shelfScrollMemory.current = scrollRef.current.scrollTop;
         const ready = await withBookBody(book);
         if (!ready || !Array.isArray(ready.chapters) || !ready.chapters.length) return;
         setCachedChapters(ready.id, ready.chapters);
@@ -943,7 +956,7 @@
       }, [showToast, t]);
 
       const updateShelfSort = useCallback(function update(sort) {
-        if (['recent', 'title', 'author', 'added', 'progress', 'rating'].indexOf(sort) < 0) return;
+        if (['recent', 'title', 'author', 'added', 'progress', 'rating', 'words'].indexOf(sort) < 0) return;
         setState(function apply(previous) { return Object.assign({}, previous, { shelfSort: sort }); });
       }, []);
 
@@ -1222,6 +1235,12 @@
       const exitReader = useCallback(function exit() {
         setReader(null);
         setTab('shelf');
+        const restoreScroll = shelfScrollMemory.current;
+        if (restoreScroll > 0) {
+          window.requestAnimationFrame(function restoreShelfScroll() {
+            if (scrollRef.current) scrollRef.current.scrollTop = restoreScroll;
+          });
+        }
         try {
           const app = document.querySelector('.sr-app');
           if (app) {
@@ -2319,7 +2338,7 @@
           h('div', { className: 'sr-brand' },
             h('div', { className: 'sr-brand-mark' }, h(BrandMark, { size: 21 })),
             h('div', { className: 'sr-brand-text' },
-              h('h1', { className: 'sr-brand-title' }, t('brand')),
+              h('div', { className: 'sr-brand-title' }, t('brand')),
               importProgress ? h('button', {
                 type: 'button',
                 className: 'sr-brand-import-pill' + (importDetailsOpen ? ' sr-brand-import-pill--active' : ''),
@@ -2376,7 +2395,28 @@
               h('div', { className: 'sr-import-progress-hint' }, t('importProgressHint')),
             ) : null,
           ),
-          h('div', { className: 'sr-nav', role: 'tablist', 'aria-label': t('brand') },
+          h('div', {
+            className: 'sr-nav',
+            role: 'tablist',
+            'aria-label': t('brand'),
+            onKeyDown: function navKeys(event) {
+              const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+              if (keys.indexOf(event.key) < 0) return;
+              event.preventDefault();
+              const ids = tabs.map(function id(item) { return item.id; });
+              const current = Math.max(0, ids.indexOf(tab));
+              let next = current;
+              if (event.key === 'ArrowLeft') next = (current + ids.length - 1) % ids.length;
+              else if (event.key === 'ArrowRight') next = (current + 1) % ids.length;
+              else if (event.key === 'Home') next = 0;
+              else next = ids.length - 1;
+              setTab(ids[next]);
+              window.requestAnimationFrame(function focusTab() {
+                const items = document.querySelectorAll('.sr-nav-item');
+                if (items[next]) items[next].focus();
+              });
+            },
+          },
             tabs.map(function nav(item) {
               return h('button', {
                 key: item.id,
@@ -2384,6 +2424,7 @@
                 className: 'sr-nav-item',
                 role: 'tab',
                 'aria-selected': tab === item.id,
+                tabIndex: tab === item.id ? 0 : -1,
                 onClick: function switchTab() { setTab(item.id); },
               },
                 h('span', null, item.label),
@@ -2463,6 +2504,10 @@
           fsSupported: fsLibrarySupported(),
           shelfTagFilter: shelfTagFilter,
           onClearShelfTagFilter: function clearShelfTag() { setShelfTagFilter(''); },
+          initialFilter: shelfUiMemory.current.filter,
+          initialTagFilters: shelfUiMemory.current.tagFilters,
+          initialTagMatch: shelfUiMemory.current.tagMatch,
+          onShelfUiChange: function rememberShelfUi(memory) { shelfUiMemory.current = memory; },
           onSetFinished: setFinishedBulk,
           onSetShelved: setShelvedBulk,
           onSetWishlist: setWishlistBulk,
