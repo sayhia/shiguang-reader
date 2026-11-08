@@ -460,15 +460,16 @@
             const haystack = (book.title + ' ' + book.author + ' ' + (book.tags || []).join(' ') + ' ' + ((props.userTags || {})[book.id] || []).join(' ')).toLowerCase();
             if (haystack.indexOf(query) < 0) return false;
           }
-          if (filter === 'reading') return Boolean(progress[book.id]) && !progress[book.id].completed;
-          if (filter === 'finished') return Boolean(progress[book.id] && progress[book.id].completed);
-          if (filter === 'local') return book.source === 'local';
-          if (filter === 'wishlist') return (state.wishlist || []).indexOf(book.id) >= 0;
-          if (filter === 'shelved') return (state.shelved || []).indexOf(book.id) >= 0;
-          if (filter === 'reviewed') return Boolean(reviews[book.id]);
-          if (filter === 'annotated') {
-            return (state.highlights || []).some(function note(item) { return item.bookId === book.id; }) || (state.bookmarks || []).some(function mark(item) { return item.bookId === book.id; });
-          }
+          // The status chip and the tag picks narrow together: a status never bypasses the tags.
+          if (filter === 'reading' && !(Boolean(progress[book.id]) && !progress[book.id].completed)) return false;
+          if (filter === 'finished' && !(progress[book.id] && progress[book.id].completed)) return false;
+          if (filter === 'local' && book.source !== 'local') return false;
+          if (filter === 'wishlist' && (state.wishlist || []).indexOf(book.id) < 0) return false;
+          if (filter === 'shelved' && (state.shelved || []).indexOf(book.id) < 0) return false;
+          if (filter === 'reviewed' && !reviews[book.id]) return false;
+          if (filter === 'annotated'
+            && !(state.highlights || []).some(function note(item) { return item.bookId === book.id; })
+            && !(state.bookmarks || []).some(function mark(item) { return item.bookId === book.id; })) return false;
           if (!matchBookTags(props.userTags || {}, book.id, liveTagFilters, tagMatch)) return false;
           return true;
         });
@@ -622,7 +623,22 @@
         };
       }, [ordered.length, view]);
 
-      const visibleIds = ordered.map(function id(book) { return book.id; });
+      const statusGroups = useMemo(function calcStatusGroups() {
+        if (view !== 'group') return [];
+        return groupBooksByStatus(ordered, progress, state.wishlist || [], state.shelved || []);
+      }, [view, ordered, progress, state.wishlist, state.shelved]);
+      // Group view draws a capped slice of each group until it is expanded. Selection,
+      // select-all, invert and shift-ranges all work over exactly what is drawn, in the
+      // order it is drawn, so a bulk action never reaches a book the reader cannot see.
+      const groupCap = 48;
+      const [expandedGroups, setExpandedGroups] = useState([]);
+      const displayed = useMemo(function calcDisplayed() {
+        if (view !== 'group') return ordered;
+        return statusGroups.reduce(function collect(list, group) {
+          return list.concat(expandedGroups.indexOf(group.id) >= 0 ? group.books : group.books.slice(0, groupCap));
+        }, []);
+      }, [view, ordered, statusGroups, expandedGroups]);
+      const visibleIds = displayed.map(function id(book) { return book.id; });
 
       const sourceById = useMemo(function createSourceMap() {
         const map = new Map();
@@ -645,8 +661,8 @@
           };
         }
         const selectedSet = new Set(selected);
-        const visibleIds = ordered.map(function id(book) { return book.id; });
-        const selectedVisible = selected.filter(function inView(id) { return visibleIds.indexOf(id) >= 0; });
+        const visibleSet = new Set(displayed.map(function id(book) { return book.id; }));
+        const selectedVisible = selected.filter(function inView(id) { return visibleSet.has(id); });
         const deletableIds = selectedVisible.filter(function local(id) {
           const book = sourceById.get(id);
           return Boolean(book) && book.source === 'local';
@@ -672,7 +688,7 @@
           selectedAllWishlisted: selectedAllWishlisted,
           selectedAllPinned: selectedAllPinned,
         };
-      }, [selected, ordered, sourceById, progress, state.shelved, state.wishlist, pins]);
+      }, [selected, displayed, sourceById, progress, state.shelved, state.wishlist, pins]);
 
       const selectedSet = selectionInfo.selectedSet;
       const selectedVisible = selectionInfo.selectedVisible;
@@ -681,11 +697,6 @@
       const selectedAllShelved = selectionInfo.selectedAllShelved;
       const selectedAllWishlisted = selectionInfo.selectedAllWishlisted;
       const selectedAllPinned = selectionInfo.selectedAllPinned;
-
-      const statusGroups = useMemo(function calcStatusGroups() {
-        if (view !== 'group') return [];
-        return groupBooksByStatus(ordered, progress, state.wishlist || [], state.shelved || []);
-      }, [view, ordered, progress, state.wishlist, state.shelved]);
 
       function exitSelect() {
         lastSelectedRef.current = null;
@@ -697,11 +708,13 @@
         setBulkMenuOpen(false);
       }
 
+      // The shift-click anchor is a book id, resolved against the order on screen at click
+      // time, so it survives sort/filter changes and follows group view's own order.
       const toggleSelect = useCallback(function toggle(book, event) {
-        const visibleIds = ordered.map(function id(item) { return item.id; });
+        const visibleIds = displayed.map(function id(item) { return item.id; });
         const index = visibleIds.indexOf(book.id);
-        if (event && event.shiftKey && lastSelectedRef.current !== null && index >= 0) {
-          const anchor = lastSelectedRef.current;
+        const anchor = lastSelectedRef.current !== null ? visibleIds.indexOf(lastSelectedRef.current) : -1;
+        if (event && event.shiftKey && anchor >= 0 && index >= 0) {
           const start = Math.min(anchor, index);
           const end = Math.max(anchor, index);
           const range = visibleIds.slice(start, end + 1);
@@ -710,25 +723,32 @@
           });
           return;
         }
-        lastSelectedRef.current = index;
+        lastSelectedRef.current = book.id;
         setSelected(function apply(previous) {
           return previous.indexOf(book.id) >= 0
             ? previous.filter(function keep(id) { return id !== book.id; })
             : previous.concat([book.id]);
         });
-      }, [ordered]);
+      }, [displayed]);
 
       useEffect(function escapeSelectMode() {
         if (!selectMode) return undefined;
         function onKey(event) {
           if (event.key !== 'Escape') return;
+          // The bulk-tag input, the tag manager and card dialogs consume their own Escape.
+          if (event.defaultPrevented) return;
+          if (event.isComposing || event.keyCode === 229) return;
+          if (tagManagerOpen) return;
           event.preventDefault();
+          // Close the innermost open layer first; only a bare Escape leaves select mode.
+          if (deleteConfirm) { setDeleteConfirm(false); return; }
+          if (bulkTagOpen) { setBulkTagOpen(false); setBulkTagDraft(''); return; }
           if (bulkMenuOpen) { setBulkMenuOpen(false); return; }
           exitSelect();
         }
         window.addEventListener('keydown', onKey);
         return function cleanup() { window.removeEventListener('keydown', onKey); };
-      }, [selectMode, bulkMenuOpen]);
+      }, [selectMode, bulkMenuOpen, bulkTagOpen, deleteConfirm, tagManagerOpen]);
 
       function bulkPin(pinned) {
         if (!selectedVisible.length || typeof props.onSetPinned !== 'function') return;
@@ -1159,6 +1179,7 @@
                     'aria-label': t('bulkTagPlaceholder'),
                     onChange: function change(event) { setBulkTagDraft(event.target.value); },
                     onKeyDown: function key(event) {
+                      if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                       if (event.key === 'Enter') {
                         event.preventDefault();
                         applyBulkTag('add');
@@ -1320,7 +1341,9 @@
             ? view === 'group'
               ? h('div', { ref: shelfGridRef, className: 'sr-status-groups' },
                 statusGroups.map(function group(item) {
-                  const groupSlice = item.books.slice(0, 48);
+                  const groupExpanded = expandedGroups.indexOf(item.id) >= 0;
+                  const groupSlice = groupExpanded ? item.books : item.books.slice(0, groupCap);
+                  const groupHidden = item.books.length - groupSlice.length;
                   return h('section', { key: item.id, className: 'sr-status-group' },
                     h('div', { className: 'sr-status-head' },
                       h('h3', null, t(item.label)),
@@ -1343,6 +1366,16 @@
                         });
                       }),
                     ),
+                    groupHidden > 0 ? h('button', {
+                      type: 'button',
+                      className: 'sr-btn sr-btn-sm sr-status-more',
+                      style: { marginTop: 12 },
+                      onClick: function expand() {
+                        setExpandedGroups(function add(previous) {
+                          return previous.indexOf(item.id) >= 0 ? previous : previous.concat(item.id);
+                        });
+                      },
+                    }, fill(t('groupShowAll'), { n: item.books.length })) : null,
                   );
                 }),
               )

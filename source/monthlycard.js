@@ -42,7 +42,13 @@
             break;
           }
           if (index === candidates.length - 1) {
-            quoteBlock = { lines: lines.slice(0, 3), size: size, lineHeight: lineHeight, top: MONTH_CARD_QUOTE_TOP };
+            // Cut to three lines and say so: the last line ends in an ellipsis that fits.
+            const kept = lines.slice(0, 3);
+            const tail = Array.from(kept[2]);
+            const trimTail = function trimTail() { return tail.join('').replace(/[\s，。、；：,.;:…]+$/, ''); };
+            while (tail.length > 1 && measure(trimTail() + '…', size) > MONTH_CARD_QUOTE_WIDTH) tail.pop();
+            kept[2] = trimTail() + '…';
+            quoteBlock = { lines: kept, size: size, lineHeight: lineHeight, top: MONTH_CARD_QUOTE_TOP };
           }
         }
       }

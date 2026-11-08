@@ -140,7 +140,7 @@ export function defineReaderTools(tool, options) {
         if (dir) {
           let indexed = null;
           try {
-            indexed = await searchLibraryIndex(dir, query, args.limit);
+            if (indexEnabled) indexed = await searchLibraryIndex(dir, query, args.limit);
           } catch (error) {
             // The index is disposable; any failure belongs to the cache, not the
             // book. Fall through to the snapshot scan without surfacing it.

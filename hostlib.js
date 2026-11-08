@@ -36,6 +36,24 @@ function asNumber(value, fallback) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+// Mirrors the client's progressPercent / groupBooksByStatus: `percent` is the
+// position inside the current chapter, "finished" means completed === true and
+// any progress entry at all means the book is being read.
+function bookProgressPercent(book, p) {
+  if (!p) return 0;
+  if (p.completed === true) return 100;
+  const chapterCount = Math.max(1, asNumber(book && book.chapterCount, 0)
+    || asArray(book && book.chapterIds).length
+    || asArray(book && book.chapters).length || 1);
+  const chapterIndex = Math.min(chapterCount - 1, Math.max(0, asNumber(p.chapterIndex, 0)));
+  const percent = Math.min(1, Math.max(0, asNumber(p.percent, 0)));
+  return Math.min(99, Math.max(0, Math.round(((chapterIndex + percent) / chapterCount) * 100)));
+}
+
+function isBookEntry(book) {
+  return Boolean(book && typeof book === 'object' && typeof book.id === 'string' && book.id);
+}
+
 function boolInt(value) {
   return value === true || value === 1 ? 1 : 0;
 }
@@ -215,7 +233,7 @@ function pictureOf(text) {
 }
 
 /** The chapter as prose: picture markers removed, one paragraph per line. */
-function proseOf(chapter) {
+export function proseOf(chapter) {
   return asArray(chapter && chapter.paragraphs).filter(function keep(part) {
     return typeof part === 'string' && !pictureOf(part);
   }).join('\n');
@@ -231,37 +249,88 @@ function picturesOf(chapter) {
   return names;
 }
 
-// The exact inverse of the client's bookBodyText: `# heading` opens a chapter,
-// paragraphs are separated by a blank line.
-function parseBodyText(text, ids) {
+// The exact inverse of the client's bookBodyText, and a copy of its
+// parseBookBodyText (source/core.js): an empty line ends a paragraph and a
+// `# title` line opens a chapter, except inside a fence, a `$$` math block or an
+// HTML container such as <pre>, which keep their blank lines. Saved chapter ids
+// apply only while the chapter count still matches.
+function isSelfClosedMath(trimmed) {
+  return trimmed.length >= 4 && trimmed.startsWith('$$') && trimmed.endsWith('$$');
+}
+
+const BODY_CONTAINER_PATTERN = /^<(pre|table|blockquote|aside|figure|ul|ol)\b/i;
+export function parseBodyText(text, ids, prefix, options) {
+  // Mirrors the client: TXT/Markdown bodies never keep an HTML container across a blank line.
+  const htmlContainers = !(options && options.plainParagraphs);
   const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
   if (!raw) return [];
-  const known = asArray(ids);
+  const known = Array.isArray(ids) ? ids : [];
   const collected = [];
   let current = null;
+  let lines = [];
+  let block = null;
+  let containerTag = '';
+  let containerDepth = 0;
+  function flush() {
+    const paragraph = lines.join('\n').trim();
+    lines = [];
+    if (paragraph && current) current.paragraphs.push(paragraph);
+  }
+  function countTag(line, pattern) {
+    const found = line.match(pattern);
+    return found ? found.length : 0;
+  }
   raw.split('\n').forEach(function each(line) {
+    const trimmed = line.trim();
+    if (block) {
+      lines.push(line);
+      if (block === 'fence') {
+        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) block = null;
+      } else if (block === 'math') {
+        if (trimmed.endsWith('$$')) block = null;
+      } else {
+        containerDepth += countTag(line, new RegExp('<' + containerTag + '\\b', 'gi'))
+          - countTag(line, new RegExp('</' + containerTag + '\\s*>', 'gi'));
+        if (containerDepth <= 0) block = null;
+      }
+      return;
+    }
     const heading = /^#\s+(.+?)\s*$/.exec(line);
     if (heading) {
-      current = { title: heading[1].slice(0, 120), lines: [] };
+      flush();
+      current = { title: heading[1].slice(0, 120), paragraphs: [] };
       collected.push(current);
       return;
     }
+    if (line === '') {
+      flush();
+      return;
+    }
     if (!current) {
-      current = { title: '正文', lines: [] };
+      current = { title: '正文', paragraphs: [] };
       collected.push(current);
     }
-    current.lines.push(line);
+    const opensContainer = htmlContainers && !lines.length && BODY_CONTAINER_PATTERN.exec(trimmed);
+    lines.push(line);
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+      block = 'fence';
+    } else if (trimmed.startsWith('$$')) {
+      if (!isSelfClosedMath(trimmed)) block = 'math';
+    } else if (opensContainer) {
+      containerTag = opensContainer[1].toLowerCase();
+      containerDepth = countTag(line, new RegExp('<' + containerTag + '\\b', 'gi'))
+        - countTag(line, new RegExp('</' + containerTag + '\\s*>', 'gi'));
+      if (containerDepth > 0) block = 'container';
+    }
   });
-  const chapters = collected.map(function finish(chapter) {
-    const paragraphs = chapter.lines.join('\n').split(/\n{2,}/)
-      .map(function trim(part) { return part.trim(); })
-      .filter(Boolean);
-    return { title: chapter.title, paragraphs: paragraphs };
-  }).filter(function keep(chapter) { return chapter.paragraphs.length > 0; });
+  flush();
+  const chapters = collected.filter(function keep(chapter) { return chapter.paragraphs.length > 0; });
+  const stem = prefix || 'imp';
+  const useKnown = known.length === chapters.length;
   return chapters.map(function identify(chapter, index) {
-    const knownId = known[index];
+    const knownId = useKnown ? known[index] : null;
     return {
-      id: typeof knownId === 'string' && knownId ? knownId : 'imp-c' + (index + 1),
+      id: typeof knownId === 'string' && knownId ? knownId : stem + '-c' + (index + 1),
       title: chapter.title,
       paragraphs: chapter.paragraphs,
     };
@@ -276,16 +345,25 @@ function decodeHtmlEntities(str) {
     if (code === 'quot') return '"';
     if (code === 'apos') return "'";
     if (code === 'nbsp') return ' ';
-    if (code.startsWith('#x') || code.startsWith('#X')) return String.fromCharCode(parseInt(code.slice(2), 16));
-    if (code.startsWith('#')) return String.fromCharCode(parseInt(code.slice(1), 10));
+    if (code.startsWith('#')) {
+      const hex = code[1] === 'x' || code[1] === 'X';
+      const n = hex ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n <= 0x10FFFF ? String.fromCodePoint(n) : m;
+    }
     return m;
   });
 }
 
 function stripEpubTags(html) {
   return decodeHtmlEntities(String(html || '')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<head\b[^>]*>[\s\S]*?<\/head\s*>/gi, '')
+    .replace(/<(meta|link|base)\b[^>]*\/?>/gi, '')
+    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg\s*>/gi, '')
+    .replace(/<svg\b[^>]*\/?>/gi, '')
+    .replace(/@(page|font-face|media|charset|import|keyframes)\b[^{]*\{[^}]*\}/gi, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .trim());
@@ -363,16 +441,26 @@ export function readEpubSync(filePath) {
     const attrs = im[1];
     const id = (attrs.match(/\bid=["']([^"']+)["']/i) || [])[1];
     const href = (attrs.match(/\bhref=["']([^"']+)["']/i) || [])[1];
-    if (id && href) manifest.set(id, href);
+    const mediaType = (attrs.match(/\bmedia-type=["']([^"']+)["']/i) || [])[1] || '';
+    const properties = (attrs.match(/\bproperties=["']([^"']+)["']/i) || [])[1] || '';
+    if (id && href) manifest.set(id, { id: id, href: href, mediaType: mediaType, properties: properties });
   }
 
-  const spine = [];
+  // Same reading order as the client's parseEpubBook: linear spine items only,
+  // HTML documents only, never the nav document. Otherwise chapter numbers the
+  // Agent sees drift from the reader's (notes, progress, chapterIndex).
+  let spine = [];
   const spineRegex = /<itemref\b([^>]*?)\/?>/gi;
   let sm;
   while ((sm = spineRegex.exec(opf))) {
     const idref = (sm[1].match(/\bidref=["']([^"']+)["']/i) || [])[1];
-    if (idref && manifest.has(idref)) spine.push({ id: idref, href: manifest.get(idref) });
+    const linear = (sm[1].match(/\blinear=["']([^"']+)["']/i) || [])[1];
+    if (idref && linear !== 'no' && manifest.has(idref)) spine.push(manifest.get(idref));
   }
+  if (!spine.length) spine = Array.from(manifest.values());
+  spine = spine.filter(function readable(item) {
+    return (item.mediaType.indexOf('html') >= 0 || /\.x?html?$/i.test(item.href)) && !/\bnav\b/.test(item.properties);
+  });
 
   const chapters = [];
   spine.forEach(function each(item, idx) {
@@ -398,23 +486,84 @@ export function readEpubSync(filePath) {
     let pm;
     while ((pm = pRegex.exec(xhtml))) {
       const clean = stripEpubTags(pm[1]);
-      if (clean && clean !== title) paras.push(clean);
+      if (clean && clean !== title && !/^[.#a-zA-Z0-9_\-,\s:>+~*]+\s*\{[^}]*\}\s*$/s.test(clean)) paras.push(clean);
     }
     if (!paras.length) {
       const body = (xhtml.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i) || [])[1] || xhtml;
       const clean = stripEpubTags(body);
-      if (clean) clean.split(/\n{2,}/).forEach(function push(l) { if (l.trim()) paras.push(l.trim()); });
+      if (clean) clean.split(/\n{2,}/).forEach(function push(l) {
+        const val = l.trim();
+        if (val && !/^[.#a-zA-Z0-9_\-,\s:>+~*]+\s*\{[^}]*\}\s*$/s.test(val)) paras.push(val);
+      });
     }
     if (paras.length) {
       chapters.push({
-        id: item.id || ('chap-' + (idx + 1)),
+        id: 'epub-c' + (chapters.length + 1),
         title: title,
         paragraphs: paras,
       });
     }
   });
 
-  return chapters;
+  // The client splits long EPUB chapters (> 7600 chars into ~3400-char parts);
+  // mirror it so chapter N here is chapter N in the reader.
+  const expanded = [];
+  chapters.forEach(function split(chapter) {
+    if (chapter.paragraphs.join('\n').length > 7600) splitLongChapter(chapter, 3400).forEach(function push(part) { expanded.push(part); });
+    else expanded.push(chapter);
+  });
+  return expanded;
+}
+
+// Copies of the client's splitLongText / splitLongChapter (source/core.js).
+function splitLongText(text, limit) {
+  const chunks = [];
+  let rest = text;
+  while (rest.length > limit) {
+    let cut = -1;
+    for (let index = Math.min(limit, rest.length - 1); index > limit * 0.55; index -= 1) {
+      if (/[。！？；.!?;\n]/.test(rest.charAt(index))) {
+        cut = index + 1;
+        break;
+      }
+    }
+    if (cut < 0) cut = limit;
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks;
+}
+
+function splitLongChapter(chapter, target) {
+  const pieces = [];
+  let current = [];
+  let size = 0;
+  function push() {
+    if (!current.length) return;
+    pieces.push(current);
+    current = [];
+    size = 0;
+  }
+  chapter.paragraphs.forEach(function paragraph(text) {
+    if (text.length > target * 1.35) {
+      push();
+      splitLongText(text, target).forEach(function part(chunk) { pieces.push([chunk]); });
+      return;
+    }
+    if (size + text.length > target && current.length) push();
+    current.push(text);
+    size += text.length;
+  });
+  push();
+  if (pieces.length <= 1) return [chapter];
+  return pieces.map(function make(paragraphs, index) {
+    return {
+      id: chapter.id + '-' + (index + 1),
+      title: index === 0 ? chapter.title : chapter.title + ' · ' + (index + 1),
+      paragraphs: paragraphs,
+    };
+  });
 }
 
 // One book's chapters, newest format first, then the JSON written by older versions.
@@ -437,7 +586,8 @@ function readBookBody(booksDir, book) {
     } else {
       try {
         const text = fs.readFileSync(full, 'utf8');
-        const chapters = parseBodyText(text, book && book.chapterIds);
+        const plainParagraphs = !!(book && (book.format === 'txt' || book.format === 'markdown'));
+        const chapters = parseBodyText(text, book && book.chapterIds, undefined, { plainParagraphs: plainParagraphs });
         if (chapters.length) return chapters;
       } catch (e) {}
     }
@@ -584,7 +734,7 @@ export function findBook(selector, dir) {
 
   if (!dir) throw new Error('book-not-found');
   const state = readLibraryDir(dir, { bodies: false }).state;
-  const customs = asArray(state.customBooks).map(function entry(book) {
+  const customs = asArray(state.customBooks).filter(isBookEntry).map(function entry(book) {
     return {
       id: String(book.id),
       title: asText(book.title, 120),
@@ -602,7 +752,7 @@ export function findBook(selector, dir) {
 
 function ambiguous(hits) {
   const error = new Error('book-ambiguous');
-  error.candidates = hits.map(function title(hit) { return hit.title; });
+  error.candidates = hits.map(function title(hit) { return `${hit.title}（id: ${hit.id}）`; });
   return error;
 }
 
@@ -673,6 +823,7 @@ function chapterTitles(state) {
       if (!item || typeof item !== 'object') return;
       const key = typeof item.id === 'string' ? item.id : String(index);
       map.set(key, asText(item.title, 160));
+      map.set('#' + index, asText(item.title, 160));
     });
     byBook.set(book.id, map);
   });
@@ -731,7 +882,7 @@ export function renderTable(columns, rows, rowCount, shown) {
   return out.join('\n');
 }
 
-function snippetOf(text, term, radius) {
+export function snippetOf(text, term, radius) {
   const body = String(text || '').replace(/\s+/g, ' ').trim();
   const at = body.toLowerCase().indexOf(String(term).toLowerCase());
   if (at < 0) return body.slice(0, radius * 2);
@@ -775,12 +926,13 @@ export function collectNotes(state) {
   }).map(function convert(item) {
     const perBook = chapterMap.get(item.bookId);
     const fromChapter = perBook && typeof item.chapterId === 'string' ? perBook.get(item.chapterId) : null;
+    const byIndex = perBook ? perBook.get('#' + Math.max(0, Math.round(asNumber(item.chapterIndex, 0)))) : null;
     return {
       id: item.id,
       bookId: item.bookId,
       bookTitle: titleMap.get(item.bookId) || item.bookId,
       chapterIndex: Math.max(0, Math.round(asNumber(item.chapterIndex, 0))),
-      chapterTitle: asText(fromChapter, 160) || asText(item.chapterTitle, 160) || null,
+      chapterTitle: asText(fromChapter, 160) || asText(item.chapterTitle, 160) || asText(byIndex, 160) || null,
       text: asText(item.text, 4000),
       note: asText(item.note, 4000),
       tags: normalizeTags(item.tags),
@@ -875,12 +1027,13 @@ export function collectBookmarks(state) {
   }).map(function convert(item) {
     const perBook = chapterMap.get(item.bookId);
     const fromChapter = perBook && typeof item.chapterId === 'string' ? perBook.get(item.chapterId) : null;
+    const byIndex = perBook ? perBook.get('#' + Math.max(0, Math.round(asNumber(item.chapterIndex, 0)))) : null;
     return {
       id: item.id,
       bookId: item.bookId,
       bookTitle: titleMap.get(item.bookId) || item.bookId,
       chapterIndex: Math.max(0, Math.round(asNumber(item.chapterIndex, 0))),
-      chapterTitle: asText(fromChapter, 160) || asText(item.chapterTitle, 160) || null,
+      chapterTitle: asText(fromChapter, 160) || asText(item.chapterTitle, 160) || asText(byIndex, 160) || null,
       progress: asNumber(item.percent, 0),
       page: asNumber(item.page, null),
       excerpt: asText(item.excerpt, 1000),
@@ -1037,7 +1190,7 @@ function formatWeekDelta(comparison) {
 /** Extracts normalized statistics from a state-shaped object. */
 export function extractStats(state, referenceDate) {
   const rawState = state && typeof state === 'object' ? state : {};
-  const allBooks = asArray(rawState.customBooks);
+  const allBooks = asArray(rawState.customBooks).filter(isBookEntry);
 
   const progress = (rawState.progress && typeof rawState.progress === 'object') ? rawState.progress : {};
   const shelved = new Set(asArray(rawState.shelved));
@@ -1051,10 +1204,10 @@ export function extractStats(state, referenceDate) {
 
   allBooks.forEach(function classify(book) {
     const p = progress[book.id];
-    const isFinished = Boolean(p && (p.completed === true || asNumber(p.percent, 0) >= 1));
+    const isFinished = Boolean(p && p.completed === true);
     const isShelved = shelved.has(book.id);
     const isWishlist = wishlist.has(book.id);
-    const isReading = Boolean(p && !isFinished && (asNumber(p.percent, 0) > 0 || asNumber(p.chapterIndex, 0) > 0));
+    const isReading = Boolean(p) && !isFinished;
 
     if (isFinished) finishedCount += 1;
     else if (isShelved) shelvedCount += 1;
@@ -1070,8 +1223,8 @@ export function extractStats(state, referenceDate) {
   const rankedBooks = allBooks.map(function wrap(book) {
     const seconds = asNumber(byBook[book.id], 0);
     const p = progress[book.id];
-    const isFinished = Boolean(p && (p.completed === true || asNumber(p.percent, 0) >= 1));
-    const pct = p ? Math.round(asNumber(p.percent, 0) * 100) : 0;
+    const isFinished = Boolean(p && p.completed === true);
+    const pct = bookProgressPercent(book, p);
     return {
       id: book.id,
       title: book.title,
@@ -1199,10 +1352,10 @@ export function collectShelfBooks(state) {
   return deduped.map(function mapBook(book) {
     const id = book.id;
     const p = progress[id];
-    const isFinished = Boolean(p && (p.completed === true || asNumber(p.percent, 0) >= 1));
+    const isFinished = Boolean(p && p.completed === true);
     const isShelved = shelved.has(id);
     const isWishlist = wishlist.has(id);
-    const isReading = Boolean(p && !isFinished && (asNumber(p.percent, 0) > 0 || asNumber(p.chapterIndex, 0) > 0));
+    const isReading = Boolean(p) && !isFinished;
 
     let status = 'unread';
     if (isFinished) status = 'finished';
@@ -1213,7 +1366,7 @@ export function collectShelfBooks(state) {
     const rev = reviews[id];
     const tags = normalizeTags(userTags[id]);
     const secs = Math.max(0, asNumber(byBook[id], 0));
-    const pct = p ? Math.min(100, Math.max(0, Math.round(asNumber(p.percent, 0) * 100))) : 0;
+    const pct = bookProgressPercent(book, p);
     const chapterIdx = p ? Math.max(0, Math.round(asNumber(p.chapterIndex, 0))) : 0;
     let chapterTitle = null;
     if (p && book.chapters && book.chapters[chapterIdx]) {

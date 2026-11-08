@@ -14,9 +14,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { collectShelfBooks, computeReadingStreak, computeWeekComparison, filterShelfBooks, readLibraryDir, renderReaderStats, renderShelfBooks } from './hostlib.js';
+import { collectBookmarks, collectNotes, collectShelfBooks, computeReadingStreak, computeWeekComparison, extractStats, filterBookmarks, filterNotes, filterShelfBooks, proseOf, readLibraryDir, renderReaderStats, renderShelfBooks, snippetOf } from './hostlib.js';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 const MAX_HITS = 200;
 let sqliteModule;
 
@@ -55,41 +55,6 @@ export function indexPathFor(dir) {
   return path.join(indexRoot(), hash + '.sqlite');
 }
 
-function chapterText(chapter) {
-  return asArray(chapter && chapter.paragraphs)
-    .filter(function prose(part) {
-      if (typeof part !== 'string') return false;
-      return !/^!\[[^\]]*\]\([^)]*\)\s*$/.test(part.trim());
-    })
-    .join('\n');
-}
-
-function chapterChars(chapter) {
-  return chapterText(chapter).length;
-}
-
-function snippetOf(text, term, radius) {
-  const source = String(text || '');
-  const needle = String(term || '');
-  const index = source.toLowerCase().indexOf(needle.toLowerCase());
-  if (index < 0) return source.slice(0, 80).replace(/\s+/g, ' ').trim();
-  const span = Math.max(30, Number(radius) || 55);
-  const start = Math.max(0, index - span);
-  const end = Math.min(source.length, index + needle.length + span);
-  const prefix = start > 0 ? '…' : '';
-  const suffix = end < source.length ? '…' : '';
-  return (prefix + source.slice(start, end) + suffix).replace(/\s+/g, ' ').trim();
-}
-
-function statusOf(state, book) {
-  const progress = state.progress && state.progress[book.id];
-  if (progress && progress.completed) return 'finished';
-  if (asArray(state.wishlist).indexOf(book.id) >= 0) return 'wishlist';
-  if (progress) return 'reading';
-  if (asArray(state.shelved).indexOf(book.id) >= 0) return 'shelved';
-  return 'unread';
-}
-
 function ensureSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS meta (
@@ -113,7 +78,8 @@ function ensureSchema(db) {
       is_finished INTEGER,
       rating INTEGER,
       review TEXT,
-      source TEXT
+      source TEXT,
+      ord INTEGER
     );
     CREATE TABLE IF NOT EXISTS chapters (
       book_id TEXT NOT NULL,
@@ -132,27 +98,18 @@ function ensureSchema(db) {
       tokenize = 'trigram'
     );
     CREATE TABLE IF NOT EXISTS notes (
-      id TEXT PRIMARY KEY,
+      seq INTEGER PRIMARY KEY,
+      id TEXT NOT NULL,
       book_id TEXT NOT NULL,
-      chapter_id TEXT,
-      chapter_index INTEGER,
-      text TEXT,
-      note TEXT,
-      tags TEXT,
-      color TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      data TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS bookmarks (
-      id TEXT PRIMARY KEY,
+      seq INTEGER PRIMARY KEY,
+      id TEXT NOT NULL,
       book_id TEXT NOT NULL,
-      chapter_id TEXT,
-      chapter_index INTEGER,
-      page INTEGER,
-      progress REAL,
-      chapter_title TEXT,
-      excerpt TEXT,
-      note TEXT,
-      created_at INTEGER
+      created_at INTEGER,
+      data TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS days (
       day TEXT PRIMARY KEY,
@@ -175,28 +132,59 @@ function readMeta(db) {
   return out;
 }
 
-function writeMeta(db, stat, snapshot) {
+// library.json alone does not describe the index: the chapter text comes from
+// the body files under books/, which the reader (or the user) can rewrite
+// without touching the snapshot. Their names, sizes and mtimes go into the key.
+function bodiesFingerprint(dir) {
+  const hash = crypto.createHash('sha1');
+  const folder = path.join(dir, 'books');
+  let names = [];
+  try { names = fs.readdirSync(folder).sort(); } catch (error) { return 'none'; }
+  names.forEach(function each(name) {
+    try {
+      const stat = fs.statSync(path.join(folder, name));
+      if (!stat.isFile()) return;
+      hash.update(name + '\0' + stat.size + '\0' + stat.mtimeMs + '\n');
+    } catch (error) { /* vanished between readdir and stat */ }
+  });
+  return hash.digest('hex');
+}
+
+function isFresh(meta, stat, bodies) {
+  return meta.schema === String(SCHEMA_VERSION)
+    && meta.snapshotMtime === String(stat.mtimeMs)
+    && meta.snapshotSize === String(stat.size)
+    && meta.bodies === bodies;
+}
+
+function writeMeta(db, stat, snapshot, bodies, counts) {
   const put = db.prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   put.run('schema', String(SCHEMA_VERSION));
   put.run('snapshotMtime', String(stat.mtimeMs));
   put.run('snapshotSize', String(stat.size));
+  put.run('bodies', bodies);
+  put.run('noteCount', String(counts.noteCount));
+  put.run('bookmarkCount', String(counts.bookmarkCount));
+  put.run('reviewCount', String(counts.reviewCount));
   put.run('builtAt', String(Date.now()));
   put.run('source', 'snapshot');
   put.run('sourcePath', path.resolve(path.dirname(snapshot)));
 }
 
-function rebuild(db, state, stat, snapshot) {
+function rebuild(db, state, stat, snapshot, bodies) {
   db.exec('BEGIN IMMEDIATE');
   try {
     db.exec('DELETE FROM chapter_fts; DELETE FROM chapters; DELETE FROM notes; DELETE FROM bookmarks; DELETE FROM days; DELETE FROM books;');
-    const bookStmt = db.prepare('INSERT INTO books(id, title, author, subtitle, tags, added_at, status, pinned, progress_percent, chapter_index, chapter_title, updated_at, seconds, is_finished, rating, review, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const bookStmt = db.prepare('INSERT OR REPLACE INTO books(id, title, author, subtitle, tags, added_at, status, pinned, progress_percent, chapter_index, chapter_title, updated_at, seconds, is_finished, rating, review, source, ord) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const chapterStmt = db.prepare('INSERT INTO chapters(book_id, chapter_index, chapter_id, chapter_title, text, char_count) VALUES (?, ?, ?, ?, ?, ?)');
     const ftsStmt = db.prepare('INSERT INTO chapter_fts(book_id, chapter_index, chapter_title, text) VALUES (?, ?, ?, ?)');
-    const noteStmt = db.prepare('INSERT OR REPLACE INTO notes(id, book_id, chapter_id, chapter_index, text, note, tags, color, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    const bookmarkStmt = db.prepare('INSERT OR REPLACE INTO bookmarks(id, book_id, chapter_id, chapter_index, page, progress, chapter_title, excerpt, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const noteStmt = db.prepare('INSERT INTO notes(id, book_id, created_at, data) VALUES (?, ?, ?, ?)');
+    const bookmarkStmt = db.prepare('INSERT INTO bookmarks(id, book_id, created_at, data) VALUES (?, ?, ?, ?)');
 
-    const sourceBooks = new Map(asArray(state.customBooks).map(function pair(book) { return [book.id, book]; }));
-    asArray(collectShelfBooks(state)).forEach(function eachBook(book) {
+    const sourceBooks = new Map(asArray(state.customBooks).filter(function valid(book) {
+      return book && typeof book.id === 'string';
+    }).map(function pair(book) { return [book.id, book]; }));
+    asArray(collectShelfBooks(state)).forEach(function eachBook(book, ord) {
       if (!book || typeof book.id !== 'string') return;
       const sourceBook = sourceBooks.get(book.id) || book;
       bookStmt.run(
@@ -217,12 +205,13 @@ function rebuild(db, state, stat, snapshot) {
         Math.max(0, Math.min(5, Math.round(asNumber(book.rating, 0)))),
         asText(book.reviewText, 4000),
         asText(book.source, 40) || 'local',
+        ord,
       );
       asArray(sourceBook.chapters).forEach(function eachChapter(chapter, index) {
         if (!chapter || typeof chapter !== 'object') return;
         const title = asText(chapter.title, 240);
-        const text = chapterText(chapter);
-        chapterStmt.run(book.id, index, asText(chapter.id, 160), title, text, chapterChars(chapter));
+        const text = proseOf(chapter);
+        chapterStmt.run(book.id, index, asText(chapter.id, 160), title, text, text.length);
         ftsStmt.run(book.id, index, title, text);
       });
     });
@@ -234,43 +223,36 @@ function rebuild(db, state, stat, snapshot) {
       if (seconds > 0) dayStmt.run(key, seconds);
     });
 
-    asArray(state.highlights).forEach(function eachNote(note) {
-      if (!note || typeof note.id !== 'string' || typeof note.bookId !== 'string') return;
-      noteStmt.run(
-        note.id,
-        note.bookId,
-        asText(note.chapterId, 160),
-        Math.max(0, Math.round(asNumber(note.chapterIndex, 0))),
-        asText(note.text, 20000),
-        asText(note.note, 20000),
-        JSON.stringify(asArray(note.tags).map(function tag(value) { return asText(value, 80); }).filter(Boolean)),
-        asText(note.color, 40),
-        asNumber(note.createdAt, 0),
-      );
+    // Notes and bookmarks are stored exactly as the snapshot path normalizes them
+    // and filtered by the same functions, so both paths always answer alike.
+    collectNotes(state).forEach(function eachNote(note) {
+      noteStmt.run(note.id, note.bookId, asNumber(note.createdAt, 0), JSON.stringify(note));
+    });
+    collectBookmarks(state).forEach(function eachBookmark(item) {
+      bookmarkStmt.run(item.id, item.bookId, asNumber(item.createdAt, 0), JSON.stringify(item));
     });
 
-    asArray(state.bookmarks).forEach(function eachBookmark(item) {
-      if (!item || typeof item.id !== 'string' || typeof item.bookId !== 'string') return;
-      bookmarkStmt.run(
-        item.id,
-        item.bookId,
-        asText(item.chapterId, 160),
-        Math.max(0, Math.round(asNumber(item.chapterIndex, 0))),
-        item.page === undefined || item.page === null ? null : Math.max(0, Math.round(asNumber(item.page, 0))),
-        Math.max(0, Math.min(1, asNumber(item.percent, 0))),
-        asText(item.chapterTitle, 240),
-        asText(item.excerpt, 4000),
-        asText(item.note, 4000),
-        asNumber(item.createdAt, 0),
-      );
-    });
-
-    writeMeta(db, stat, snapshot);
+    writeMeta(db, stat, snapshot, bodies, extractStats(state));
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (rollbackError) { /* preserve original error */ }
     throw error;
   }
+}
+
+function removeCache(file) {
+  ['', '-wal', '-shm'].forEach(function each(ext) {
+    try { fs.rmSync(file + ext, { force: true }); } catch (error) { /* ignore */ }
+  });
+}
+
+// SQLITE_CORRUPT (11) and SQLITE_NOTADB (26): the file itself is unusable. Any
+// other failure (a busy lock held by another process, a bad snapshot) says
+// nothing about the cache, and deleting it under a live connection would orphan
+// its WAL.
+function isBrokenCache(error) {
+  const code = Number(error && error.errcode) & 0xff;
+  return code === 11 || code === 26;
 }
 
 function openDatabase(mod, file) {
@@ -293,31 +275,35 @@ async function ensureIndex(dir) {
     db = openDatabase(mod, file);
     ensureSchema(db);
     const meta = readMeta(db);
-    if (meta.schema === String(SCHEMA_VERSION) && meta.snapshotMtime === String(stat.mtimeMs) && meta.snapshotSize === String(stat.size)) {
+    const bodies = bodiesFingerprint(dir);
+    if (isFresh(meta, stat, bodies)) {
       return { db: db, file: file, snapshot: snapshot };
     }
     if (meta.schema && meta.schema !== String(SCHEMA_VERSION)) {
       db.close();
-      fs.rmSync(file, { force: true });
+      db = null;
+      removeCache(file);
       db = openDatabase(mod, file);
       ensureSchema(db);
     }
     const read = readLibraryDir(dir);
-    rebuild(db, read.state, stat, snapshot);
+    rebuild(db, read.state, stat, snapshot, bodies);
     return { db: db, file: file, snapshot: snapshot };
   } catch (error) {
     if (db) {
       try { db.close(); } catch (closeError) { /* ignore */ }
     }
-    // A corrupt or half-written cache must never block reading: drop it and let
-    // the caller scan the snapshot instead.
-    try { fs.rmSync(file, { force: true }); } catch (removeError) { /* ignore */ }
+    // A failing cache must never block reading: the caller scans the snapshot
+    // instead. Only a corrupt file is dropped, together with its sidecars.
+    if (isBrokenCache(error)) removeCache(file);
     return null;
   }
 }
 
+// Only the chapter body is searched, as in the snapshot scan; a quote inside
+// the term is doubled, which is how FTS5 escapes it inside a phrase.
 function ftsPhrase(term) {
-  return '"' + String(term).replace(/"/g, '') + '"';
+  return 'text : "' + String(term).replace(/"/g, '""') + '"';
 }
 
 function likePattern(term) {
@@ -325,7 +311,8 @@ function likePattern(term) {
 }
 
 function queryRows(db, term, limit) {
-  if (term.length >= 3) {
+  // The trigram tokenizer needs three characters, not three UTF-16 units.
+  if (Array.from(term).length >= 3) {
     try {
       const phrase = ftsPhrase(term);
       const total = db.prepare('SELECT COUNT(*) AS n FROM chapter_fts WHERE chapter_fts MATCH ?').get(phrase).n;
@@ -338,7 +325,7 @@ function queryRows(db, term, limit) {
         FROM chapter_fts
         JOIN books ON books.id = chapter_fts.book_id
         WHERE chapter_fts MATCH ?
-        ORDER BY bm25(chapter_fts)
+        ORDER BY books.ord, chapter_fts.chapter_index
         LIMIT ?
       `).all(phrase, limit);
       return { total: Number(total) || 0, rows: rows };
@@ -350,8 +337,8 @@ function queryRows(db, term, limit) {
   const total = db.prepare(`
     SELECT COUNT(*) AS n
     FROM chapters
-    WHERE chapters.text LIKE ? ESCAPE '\\' OR chapters.chapter_title LIKE ? ESCAPE '\\'
-  `).get(pattern, pattern).n;
+    WHERE chapters.text LIKE ? ESCAPE '\\'
+  `).get(pattern).n;
   const rows = db.prepare(`
     SELECT chapters.book_id AS bookId,
            books.title AS bookTitle,
@@ -360,10 +347,10 @@ function queryRows(db, term, limit) {
            chapters.text AS text
     FROM chapters
     JOIN books ON books.id = chapters.book_id
-    WHERE chapters.text LIKE ? ESCAPE '\\' OR chapters.chapter_title LIKE ? ESCAPE '\\'
-    ORDER BY chapters.book_id, chapters.chapter_index
+    WHERE chapters.text LIKE ? ESCAPE '\\'
+    ORDER BY books.ord, chapters.chapter_index
     LIMIT ?
-  `).all(pattern, pattern, limit);
+  `).all(pattern, limit);
   return { total: Number(total) || 0, rows: rows };
 }
 
@@ -380,168 +367,36 @@ function parseTags(value) {
   }
 }
 
-/**
- * Notes from the index, in the shape renderNotes expects. `meta.notes` is a
- * zero-filled array only because the renderer uses its length for the "库里有
- * N 条摘录" hint; the query itself never loads every note.
- */
+function storedRows(db, table) {
+  return db.prepare(`SELECT data FROM ${table} ORDER BY seq`).all().map(function parse(row) {
+    try { return JSON.parse(row.data); } catch (error) { return null; }
+  }).filter(Boolean);
+}
+
+/** Notes from the index, filtered and shaped exactly like the snapshot path. */
 export async function queryNotesIndex(dir, options) {
   const prepared = await ensureIndex(String(dir || ''));
   if (!prepared) return null;
-  const opts = options && typeof options === 'object' ? options : {};
-  const term = String(opts.query || '').trim();
-  const book = String(opts.book || '').trim();
-  const tag = String(opts.tag || '').trim();
-  const limit = Math.min(Math.max(Math.round(asNumber(opts.limit, 20)), 1), 200);
-  const conditions = [];
-  const params = [];
-  if (term) {
-    const pattern = likePattern(term);
-    conditions.push("(LOWER(n.text) LIKE LOWER(?) ESCAPE '\\' OR LOWER(n.note) LIKE LOWER(?) ESCAPE '\\')");
-    params.push(pattern, pattern);
-  }
-  if (book) {
-    const pattern = likePattern(book);
-    conditions.push("(n.book_id = ? OR LOWER(b.title) LIKE LOWER(?) ESCAPE '\\')");
-    params.push(book, pattern);
-  }
-  if (tag) {
-    conditions.push('EXISTS (SELECT 1 FROM json_each(n.tags) WHERE LOWER(json_each.value) = LOWER(?))');
-    params.push(tag);
-  }
-  const where = indexWhere(conditions);
   try {
-    const stored = prepared.db.prepare('SELECT COUNT(*) AS n FROM notes').get().n;
-    const total = prepared.db.prepare('SELECT COUNT(*) AS n FROM notes n JOIN books b ON b.id = n.book_id' + where).get(...params).n;
-    const rows = prepared.db.prepare(`
-      SELECT n.id AS id,
-             n.book_id AS bookId,
-             b.title AS bookTitle,
-             n.chapter_index AS chapterIndex,
-             COALESCE(
-               (SELECT c.chapter_title FROM chapters c WHERE c.book_id = n.book_id AND c.chapter_id = n.chapter_id LIMIT 1),
-               (SELECT c.chapter_title FROM chapters c WHERE c.book_id = n.book_id AND c.chapter_index = n.chapter_index LIMIT 1),
-               ''
-             ) AS chapterTitle,
-             n.text AS text,
-             n.note AS note,
-             n.tags AS tags,
-             n.color AS color,
-             n.created_at AS createdAt
-      FROM notes n
-      JOIN books b ON b.id = n.book_id
-      ${where}
-      ORDER BY n.created_at DESC, n.id ASC
-      LIMIT ?
-    `).all(...params, limit);
+    const notes = storedRows(prepared.db, 'notes');
     return {
-      result: {
-        total: Number(total) || 0,
-        notes: rows.map(function note(row) {
-          return {
-            id: row.id,
-            bookId: row.bookId,
-            bookTitle: row.bookTitle,
-            chapterIndex: Number(row.chapterIndex) || 0,
-            chapterTitle: row.chapterTitle || null,
-            text: row.text || '',
-            note: row.note || '',
-            tags: parseTags(row.tags),
-            color: row.color || null,
-            createdAt: Number(row.createdAt) || null,
-          };
-        }),
-        limit: limit,
-        query: term,
-        book: book,
-        tag: tag,
-      },
-      meta: {
-        source: 'snapshot',
-        where: prepared.snapshot,
-        notes: new Array(Number(stored) || 0).fill(null),
-      },
+      result: filterNotes(notes, options),
+      meta: { source: 'snapshot', where: prepared.snapshot, notes: notes },
     };
   } finally {
     try { prepared.db.close(); } catch (error) { /* ignore */ }
   }
 }
 
-/** Bookmarks from the index, in the shape renderBookmarks expects. */
+/** Bookmarks from the index, filtered and shaped exactly like the snapshot path. */
 export async function queryBookmarksIndex(dir, options) {
   const prepared = await ensureIndex(String(dir || ''));
   if (!prepared) return null;
-  const opts = options && typeof options === 'object' ? options : {};
-  const term = String(opts.query || '').trim();
-  const book = String(opts.book || '').trim();
-  const withNote = opts.withNote === true;
-  const limit = Math.min(Math.max(Math.round(asNumber(opts.limit, 20)), 1), 200);
-  const conditions = [];
-  const params = [];
-  if (term) {
-    const pattern = likePattern(term);
-    conditions.push("(LOWER(n.excerpt) LIKE LOWER(?) ESCAPE '\\' OR LOWER(n.note) LIKE LOWER(?) ESCAPE '\\')");
-    params.push(pattern, pattern);
-  }
-  if (book) {
-    const pattern = likePattern(book);
-    conditions.push("(n.book_id = ? OR LOWER(b.title) LIKE LOWER(?) ESCAPE '\\')");
-    params.push(book, pattern);
-  }
-  if (withNote) conditions.push("TRIM(n.note) <> ''");
-  const where = indexWhere(conditions);
   try {
-    const stored = prepared.db.prepare('SELECT COUNT(*) AS n FROM bookmarks').get().n;
-    const total = prepared.db.prepare('SELECT COUNT(*) AS n FROM bookmarks n JOIN books b ON b.id = n.book_id' + where).get(...params).n;
-    const rows = prepared.db.prepare(`
-      SELECT n.id AS id,
-             n.book_id AS bookId,
-             b.title AS bookTitle,
-             n.chapter_index AS chapterIndex,
-             COALESCE(
-               (SELECT c.chapter_title FROM chapters c WHERE c.book_id = n.book_id AND c.chapter_id = n.chapter_id LIMIT 1),
-               (SELECT c.chapter_title FROM chapters c WHERE c.book_id = n.book_id AND c.chapter_index = n.chapter_index LIMIT 1),
-               n.chapter_title,
-               ''
-             ) AS chapterTitle,
-             n.page AS page,
-             n.progress AS progress,
-             n.excerpt AS excerpt,
-             n.note AS note,
-             n.created_at AS createdAt
-      FROM bookmarks n
-      JOIN books b ON b.id = n.book_id
-      ${where}
-      ORDER BY n.created_at DESC, n.id ASC
-      LIMIT ?
-    `).all(...params, limit);
+    const bookmarks = storedRows(prepared.db, 'bookmarks');
     return {
-      result: {
-        total: Number(total) || 0,
-        bookmarks: rows.map(function bookmark(row) {
-          return {
-            id: row.id,
-            bookId: row.bookId,
-            bookTitle: row.bookTitle,
-            chapterIndex: Number(row.chapterIndex) || 0,
-            chapterTitle: row.chapterTitle || null,
-            progress: Number(row.progress) || 0,
-            page: row.page === null || row.page === undefined ? null : Number(row.page),
-            excerpt: row.excerpt || '',
-            note: row.note || '',
-            createdAt: Number(row.createdAt) || null,
-          };
-        }),
-        limit: limit,
-        query: term,
-        book: book,
-        withNote: withNote,
-      },
-      meta: {
-        source: 'snapshot',
-        where: prepared.snapshot,
-        bookmarks: new Array(Number(stored) || 0).fill(null),
-      },
+      result: filterBookmarks(bookmarks, options),
+      meta: { source: 'snapshot', where: prepared.snapshot, bookmarks: bookmarks },
     };
   } finally {
     try { prepared.db.close(); } catch (error) { /* ignore */ }
@@ -558,7 +413,7 @@ export async function queryShelfIndex(dir, options) {
              progress_percent AS progressPercent, chapter_index AS chapterIndex,
              chapter_title AS chapterTitle, updated_at AS updatedAt, seconds,
              is_finished AS isFinished, rating, review AS reviewText, source
-      FROM books
+      FROM books ORDER BY ord
     `).all();
     const books = rows.map(function book(row) {
       return {
@@ -617,7 +472,7 @@ export async function queryStatsIndex(dir) {
     });
     const rankedBooks = prepared.db.prepare(`
       SELECT id, title, author, seconds, is_finished AS isFinished, progress_percent AS progressPercent
-      FROM books WHERE seconds > 0 ORDER BY seconds DESC
+      FROM books WHERE seconds > 0 ORDER BY seconds DESC, ord
     `).all().map(function row(item) {
       return {
         id: item.id,
@@ -628,9 +483,10 @@ export async function queryStatsIndex(dir) {
         percent: Number(item.progressPercent) || 0,
       };
     });
-    const noteCount = prepared.db.prepare('SELECT COUNT(*) AS n FROM notes').get().n;
-    const bookmarkCount = prepared.db.prepare('SELECT COUNT(*) AS n FROM bookmarks').get().n;
-    const reviewCount = prepared.db.prepare("SELECT COUNT(*) AS n FROM books WHERE rating > 0 OR TRIM(review) <> ''").get().n;
+    const meta = readMeta(prepared.db);
+    const noteCount = meta.noteCount;
+    const bookmarkCount = meta.bookmarkCount;
+    const reviewCount = meta.reviewCount;
     const stats = {
       totalBooks: Number(totalBooks) || 0,
       readingCount: counts.reading,
@@ -717,7 +573,7 @@ export async function indexStatus(dir) {
       bookmarks: Number(bookmarks) || 0,
       schema: Number(meta.schema) || 0,
       builtAt: Number(meta.builtAt) || 0,
-      stale: !(meta.schema === String(SCHEMA_VERSION) && meta.snapshotMtime === String(stat.mtimeMs) && meta.snapshotSize === String(stat.size)),
+      stale: !isFresh(meta, stat, bodiesFingerprint(String(dir || ''))),
     };
   } catch (error) {
     return { available: true, built: false, file: file, error: String(error && error.message || error) };
@@ -747,7 +603,7 @@ export async function searchLibraryIndex(dir, query, limit) {
           bookTitle: row.bookTitle,
           chapterIndex: row.chapterIndex,
           chapterTitle: row.chapterTitle || null,
-          snippet: snippetOf(row.text, term),
+          snippet: snippetOf(row.text, term, 30),
         };
       }),
       limit: max,

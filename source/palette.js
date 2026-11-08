@@ -131,6 +131,7 @@
       }
 
       function handleKeyDown(event) {
+        if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
         if (event.key === 'ArrowDown') {
           event.preventDefault();
           setCursor(rows.length ? (activeIndex + 1) % rows.length : 0);

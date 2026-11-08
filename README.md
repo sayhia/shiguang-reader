@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/shiguang-reader.svg)](https://www.npmjs.com/package/shiguang-reader)
 [![Publish npm package](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml/badge.svg)](https://github.com/sayhia/shiguang-reader/actions/workflows/publish.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 > 把世界关小一点，把书页放大一点。
 
@@ -46,14 +47,14 @@ npm install shiguang-reader
 
 ### 第一次使用
 
-1. 点击「导入本地书」，选择 TXT / Markdown / EPUB。
+1. 点击「导入本地书」，选择 TXT / Markdown / EPUB / MOBI / AZW3 / FB2（可多选，也可直接拖入）。
 2. 首次导入会被要求选择一个**书库目录**；正文和原始 EPUB 都会保存在那里。
 3. 开始阅读、划线、写想法，数据自动保存。
 
 ## 功能
 
 ### 阅读
-分页阅读、目录与章节进度、纸张/月白/青瓷/夜间主题、字号/行距/页宽调节、全屏与语音朗读。
+分页阅读、目录与章节进度、纸张/烛光/雪白/夜间/墨水屏/跟随系统主题、字号/行距/四档页宽与自定义页宽调节、全屏与语音朗读。
 
 ### 笔记
 划线、想法、四种颜色、标签、书签、书评、摘录卡片；支持导出 Markdown、Obsidian Callout 与整本笔记。
@@ -64,9 +65,13 @@ npm install shiguang-reader
 ### 搜索与统计
 书内搜索、跨书正文搜索、命中高亮、引用复制；七日趋势、连续阅读、热力图、阅读节律、时长排行与月度卡片。
 
+### 阅读布局
+单页 / 双栏 / 连续滚动；精装、杂志、极简三套预设；设置支持全局 / 仅本书范围、搜索、实时预览、撤销/重做与首次引导；沉浸式工具栏、书级封面、章节扉页、章节进度轨、页边批注与脚注、专注阅读带、竖排、按书图片布局、左侧停靠侧栏、极简底栏、拇指底栏和边缘翻页。
+
 ## 数据
 
 - 正文只保存在你选择的**书库目录**：`library.json` + `books/*.txt` + 原始 `.epub`。
+- MOBI / AZW3 / FB2 导入时转换为可读的 `books/*.txt` 正文，图片放在同名 `.assets/` 目录；不另存原始文件。
 - 浏览器只保存书架元数据、进度、笔记与设置。
 - SQLite 只做宿主侧的**派生检索索引**，可随时删除重建；设置 `index: false` 可完全关闭。
 - 不使用 `better-sqlite3`，SQLite 也不是主存储。
@@ -99,7 +104,7 @@ npm test        # 客户端 + 宿主测试
 dsh plugin --profile desktop add link:/path/to/shiguang-reader
 ```
 
-推送 `main` 时，GitHub Actions 会自动构建、跑测试，并在版本号尚未发布时推送 npm；已存在的版本自动跳过。
+推送 `main` 时，GitHub Actions 只会构建和跑测试，不会发布 npm。需要发布时，先更新版本并推送，再在 Actions 中手动运行 **Publish npm package**。
 
 ```bash
 npm version patch
@@ -110,4 +115,11 @@ git push origin main
 
 - 书库目录依赖 Chromium 的 File System Access API；Safari / Firefox 不支持导入。
 - EPUB 按纯文字阅读，不还原固定版式；不解析 PDF。
+- 支持的格式：TXT、Markdown、EPUB、MOBI / AZW / AZW3 / PRC（PalmDOC 与 HUFF/CDIC 压缩）、FB2 / FBZ。
+- 受 DRM 保护的 Kindle 书与 Topaz 格式无法导入；PDF、DOCX、HTML、RTF 暂不支持。
+- 没有标题标签的 MOBI 按「第 N 章 / Chapter N」等行分章。
 - 截图使用演示数据，真实阅读数据保存在本机。
+
+## 许可证 · License
+
+本项目基于 [Apache License 2.0](LICENSE) 许可协议开源。

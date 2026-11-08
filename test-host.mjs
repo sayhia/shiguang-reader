@@ -12,10 +12,13 @@ import path from 'node:path';
 import { apply, defineReaderTools } from './index.js';
 import { indexPathFor, indexStatus, pruneIndexes, queryBookmarksIndex, queryNotesIndex, queryShelfIndex, queryStatsIndex, searchLibraryIndex } from './hostindex.js';
 import {
+  searchLibraryDocs,
   chaptersOf,
+  collectNotes,
   collectShelfBooks,
   computeReadingStreak,
   computeWeekComparison,
+  extractStats,
   filterBookmarks,
   filterNotes,
   filterShelfBooks,
@@ -203,9 +206,14 @@ const indexed = await searchLibraryIndex(libraryDir, '灯火阑珊', 20);
 assert.ok(indexed, 'node:sqlite FTS index is available in the host test runtime');
 assert.equal(indexed.indexed, true);
 assert.equal(indexed.source, 'snapshot');
-assert.equal(indexed.hits[0].bookTitle, '大书');
-assert.equal(indexed.hits[0].chapterIndex, 1);
-assert.match(indexed.hits[0].snippet, /灯火阑珊/);
+// Same hits, same order and same snippets as the snapshot scan.
+const scanned = searchLibraryDocs(libraryDir, '灯火阑珊', 20);
+assert.deepEqual(indexed.hits, scanned.hits);
+assert.equal(indexed.total, scanned.total);
+const bigHit = indexed.hits.find(function big(hit) { return hit.bookTitle === '大书'; });
+assert.ok(bigHit, '大书 is among the hits');
+assert.equal(bigHit.chapterIndex, 1);
+assert.match(bigHit.snippet, /灯火阑珊/);
 assert.ok(fs.existsSync(indexPathFor(libraryDir)), 'index cache lives outside the library folder');
 assert.ok(!fs.existsSync(path.join(libraryDir, 'index.sqlite')), 'library folder is not polluted by the cache');
 const shortIndexed = await searchLibraryIndex(libraryDir, '西风', 20);
@@ -429,7 +437,8 @@ const shelfAll = await shelfTool.execute({ libraryDir });
 assert.match(shelfAll, /来源：书库目录/);
 assert.match(shelfAll, /【书架藏书（共 3 本）】/);
 assert.match(shelfAll, /《大书》 · 某人 \[在读\]/);
-assert.match(shelfAll, /进度 25%/);
+// 25% through chapter 1 of 2 is 13% of the book, the same figure the reader shows.
+assert.match(shelfAll, /进度 13%/);
 
 // Filter by status on libraryDir
 const shelfReading = await shelfTool.execute({ libraryDir, status: 'reading' });
@@ -677,6 +686,48 @@ assert.equal(directEpubChapters[0].paragraphs[0], '海风从窗边吹进来。')
 assert.equal(directEpubChapters[1].title, '第二章 归航');
 assert.equal(directEpubChapters[1].paragraphs[1], '她把书合上，听见远处的汽笛。');
 
+// Regression (BUGFIXES P1-1): host EPUB chapters follow the reader's numbering —
+// the nav document and linear="no" items are skipped, long chapters are split.
+{
+  const storedZip = (files) => {
+    const locals = []; const centrals = []; let offset = 0;
+    for (const [name, text] of files) {
+      const nameBuf = Buffer.from(name); const data = Buffer.from(text);
+      const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBuf.length, 26);
+      const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0);
+      central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(nameBuf.length, 28); central.writeUInt32LE(offset, 42);
+      locals.push(local, nameBuf, data); centrals.push(central, nameBuf);
+      offset += 30 + nameBuf.length + data.length;
+    }
+    const dir = Buffer.concat(centrals); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10); end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, dir, end]);
+  };
+  const longBody = Array.from({ length: 30 }, () => '<p>' + '潮'.repeat(299) + '。</p>').join('');
+  const opf = '<package><manifest>'
+    + '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+    + '<item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>'
+    + '<item id="extra" href="extra.xhtml" media-type="application/xhtml+xml"/>'
+    + '<item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>'
+    + '</manifest><spine><itemref idref="nav"/><itemref idref="a"/><itemref idref="extra" linear="no"/><itemref idref="b"/></spine></package>';
+  const epubFile = path.join(workdir, 'order-check.epub');
+  fs.writeFileSync(epubFile, storedZip([
+    ['META-INF/container.xml', '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>'],
+    ['OEBPS/content.opf', opf],
+    ['OEBPS/nav.xhtml', '<html><body><nav><ol><li>目录项</li></ol></nav></body></html>'],
+    ['OEBPS/a.xhtml', '<html><body><h1>长章</h1>' + longBody + '</body></html>'],
+    ['OEBPS/extra.xhtml', '<html><body><p>附录不在阅读顺序里</p></body></html>'],
+    ['OEBPS/b.xhtml', '<html><body><h1>短章</h1><p>短章正文</p></body></html>'],
+  ]));
+  const ordered = readEpubSync(epubFile);
+  const shortIndex = ordered.findIndex((chapter) => chapter.paragraphs.includes('短章正文'));
+  assert.equal(ordered.length, 4, 'nav and linear="no" skipped, 9k-char chapter split in 3: ' + ordered.map((c) => c.title).join('|'));
+  assert.equal(shortIndex, 3, 'short chapter is chapter 4, as in the reader');
+  assert.deepEqual(ordered.map((c) => c.id), ['epub-c1-1', 'epub-c1-2', 'epub-c1-3', 'epub-c2']);
+  assert.ok(!ordered.some((c) => c.paragraphs.some((p) => p.includes('目录项') || p.includes('附录'))));
+}
+
 // EPUB stored directly on disk without .txt file in library folder
 const epubDiskDir = path.join(workdir, '纯EPUB书库');
 fs.mkdirSync(path.join(epubDiskDir, 'books'), { recursive: true });
@@ -697,6 +748,100 @@ const epubSearchResult = searchBooks(epubDiskRead.state.customBooks, '远处的�
 assert.equal(epubSearchResult.hits.length, 1);
 assert.equal(epubSearchResult.hits[0].bookId, 'local-epub-pure');
 assert.equal(epubSearchResult.hits[0].chapterTitle, '第二章 归航');
+
+// --- regressions from the bug audit ----------------------------------------
+
+// Status and progress follow the reader: `percent` is inside the current chapter,
+// only `completed` means finished, and any progress entry means "reading".
+const tenIds = Array.from({ length: 10 }, (_, i) => 'c' + i);
+const progressShelf = collectShelfBooks({
+  customBooks: [
+    { id: 'p-end1', title: '第一章读完', chapterIds: tenIds },
+    { id: 'p-open', title: '刚翻开', chapterIds: tenIds },
+    { id: 'p-done', title: '读完了', chapterIds: tenIds },
+  ],
+  progress: {
+    'p-end1': { chapterIndex: 0, percent: 1 },
+    'p-open': { chapterIndex: 0, percent: 0 },
+    'p-done': { chapterIndex: 9, percent: 1, completed: true },
+  },
+});
+assert.deepEqual(progressShelf.map((b) => [b.status, b.progressPercent]), [['reading', 10], ['reading', 0], ['finished', 100]]);
+const progressStats = extractStats({
+  customBooks: [null, { id: 'p-end1', title: '第一章读完', chapterIds: tenIds }],
+  progress: { 'p-end1': { chapterIndex: 0, percent: 1 } },
+  stats: { byBook: { 'p-end1': 60 } },
+});
+assert.equal(progressStats.finishedCount, 0, 'end of chapter 1 is not the end of the book');
+assert.equal(progressStats.readingCount, 1);
+assert.equal(progressStats.rankedBooks[0].percent, 10);
+
+// Markdown bodies: a `# comment` inside a code fence is not a chapter heading,
+// and numeric entities beyond the BMP decode to the right character.
+const fenceDir = path.join(workdir, 'fence');
+fs.mkdirSync(path.join(fenceDir, 'books'), { recursive: true });
+fs.writeFileSync(path.join(fenceDir, 'library.json'), JSON.stringify({
+  v: 1,
+  customBooks: [
+    { id: 'local-md', title: '手册', chaptersInFs: true },
+    null,
+    { id: 'local-dup1', title: '同名书' },
+    { id: 'local-dup2', title: '同名书' },
+  ],
+}));
+fs.writeFileSync(path.join(fenceDir, 'books', '手册--local-md.md'),
+  '# Intro\n\nSetup:\n\n```bash\n# install deps\nnpm i\n```\n\n# Usage\n\nRun it.\n');
+assert.deepEqual(readLibraryDir(fenceDir).state.customBooks.filter(Boolean)[0].chapters.map((c) => c.title), ['Intro', 'Usage']);
+const fenceRead = await bookTool.execute({ libraryDir: fenceDir, title: '手册' });
+assert.doesNotMatch(fenceRead, /install deps（/, 'fenced comment is not listed as a chapter');
+// A null shelf entry must not crash book lookup; same-title books name their ids.
+assert.match(await bookTool.execute({ libraryDir: fenceDir, title: '同名书' }), /local-dup1.*local-dup2/);
+
+// index:false keeps reading_search off SQLite entirely.
+const offHome = path.join(workdir, 'offhome');
+const savedHome = process.env.DSH_HOME;
+process.env.DSH_HOME = offHome;
+await snapshotByName.get('reading_search').execute({ libraryDir, query: '灯火阑珊' });
+assert.equal(fs.existsSync(path.join(offHome, 'storages', 'shiguang-reader', 'index')), false, 'index:false never creates a cache');
+process.env.DSH_HOME = savedHome;
+
+// The index follows the body files, not just library.json.
+const bodyDir = path.join(workdir, 'bodies');
+fs.mkdirSync(path.join(bodyDir, 'books'), { recursive: true });
+fs.writeFileSync(path.join(bodyDir, 'library.json'), JSON.stringify({
+  v: 1,
+  customBooks: [{ id: 'local-body', title: '风起', chaptersInFs: true }],
+  highlights: [
+    { id: 'h-orphan', bookId: 'local-gone', chapterIndex: 0, text: '孤儿摘录', createdAt: 2 },
+    { id: 'h-comma', bookId: 'local-body', chapterIndex: 0, text: '逗号标签', tags: '诗,词', createdAt: 1 },
+    { id: 'h-accent', bookId: 'local-body', chapterIndex: 0, text: 'Été note', createdAt: 0 },
+  ],
+  reviews: { 'local-body': { text: '' }, 'local-gone': { rating: 3 } },
+}));
+const bodyFile = path.join(bodyDir, 'books', '风起--local-body.txt');
+fs.writeFileSync(bodyFile, '# 风起之章\n\nold sentence here, with "quoted words" and 𠀀字.\n');
+assert.equal((await searchLibraryIndex(bodyDir, 'old sentence', 20)).total, 1);
+fs.writeFileSync(bodyFile, '# 风起之章\n\nbrand new sentence, with "quoted words" and 𠀀字 too.\n');
+assert.equal((await searchLibraryIndex(bodyDir, 'old sentence', 20)).total, 0, 'rewritten body invalidates the cache');
+assert.equal((await searchLibraryIndex(bodyDir, 'brand new', 20)).total, 1);
+assert.equal((await indexStatus(bodyDir)).stale, false);
+// Quotes, astral characters and chapter titles behave as in the snapshot scan.
+for (const query of ['"quoted words"', 'with "quoted', '𠀀字', '风起之章']) {
+  const fromIndex = await searchLibraryIndex(bodyDir, query, 20);
+  const fromScan = searchLibraryDocs(bodyDir, query, 20);
+  assert.equal(fromIndex.total, fromScan.total, 'index and scan agree on ' + query);
+  assert.deepEqual(fromIndex.hits, fromScan.hits, 'same hits for ' + query);
+}
+// Notes and stats from the index match the snapshot path.
+const scanNotes = collectNotes(readLibraryDir(bodyDir).state);
+for (const options of [{}, { tag: '诗' }, { query: 'été' }, { book: 'local-gone' }]) {
+  const fromIndex = await queryNotesIndex(bodyDir, options);
+  assert.deepEqual(fromIndex.result, filterNotes(scanNotes, options), 'notes agree for ' + JSON.stringify(options));
+}
+const bodyStats = byName.get('reading_stats');
+const bodyIndexedStats = await bodyStats.execute({ libraryDir: bodyDir });
+const plainStats = await snapshotByName.get('reading_stats').execute({ libraryDir: bodyDir });
+assert.equal(bodyIndexedStats.match(/划线想法.*/)[0], plainStats.match(/划线想法.*/)[0]);
 
 fs.rmSync(workdir, { recursive: true, force: true });
 

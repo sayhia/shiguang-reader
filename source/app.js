@@ -24,6 +24,88 @@
       }
     }
 
+    // Undo for a delete: puts the removed books and every trace of them back from
+    // the snapshot taken at the click, on top of the *current* state. Restoring the
+    // whole snapshot instead would also revert whatever happened during the undo
+    // window — reading progress, a new highlight, an import.
+    function restoreRemovedBooks(current, snapshot, ids) {
+      const now = current && typeof current === 'object' ? current : {};
+      const before = snapshot && typeof snapshot === 'object' ? snapshot : {};
+      const gone = new Set((Array.isArray(ids) ? ids : []).filter(function ok(id) { return typeof id === 'string' && id; }));
+      if (!gone.size) return now;
+      const currentBooks = Array.isArray(now.customBooks) ? now.customBooks : [];
+      const snapshotBooks = Array.isArray(before.customBooks) ? before.customBooks : [];
+      const currentById = new Map();
+      currentBooks.forEach(function index(book) { if (book && book.id) currentById.set(book.id, book); });
+      const snapshotIds = new Set(snapshotBooks.map(function id(book) { return book && book.id; }));
+      // Books added since the delete stay in front, where an import puts them; the
+      // rest keep the order they had, with the restored ones back in their place.
+      const added = currentBooks.filter(function fresh(book) { return book && !snapshotIds.has(book.id); });
+      const ordered = [];
+      snapshotBooks.forEach(function each(book) {
+        if (!book) return;
+        if (currentById.has(book.id)) ordered.push(currentById.get(book.id));
+        else if (gone.has(book.id)) ordered.push(book);
+      });
+      const customBooks = added.concat(ordered);
+      function mergeMap(nowMap, beforeMap) {
+        const out = Object.assign({}, nowMap && typeof nowMap === 'object' ? nowMap : {});
+        const old = beforeMap && typeof beforeMap === 'object' ? beforeMap : {};
+        gone.forEach(function put(id) {
+          if (Object.prototype.hasOwnProperty.call(old, id) && !Object.prototype.hasOwnProperty.call(out, id)) out[id] = old[id];
+        });
+        return out;
+      }
+      function mergeByBook(nowList, beforeList) {
+        const list = Array.isArray(nowList) ? nowList : [];
+        const back = (Array.isArray(beforeList) ? beforeList : []).filter(function hit(item) {
+          return item && gone.has(item.bookId) && list.indexOf(item) < 0;
+        });
+        return back.length ? list.concat(back) : list;
+      }
+      function mergeIds(nowList, beforeList) {
+        const out = (Array.isArray(nowList) ? nowList : []).slice();
+        (Array.isArray(beforeList) ? beforeList : []).forEach(function each(id, index) {
+          if (!gone.has(id) || out.indexOf(id) >= 0) return;
+          out.splice(Math.min(index, out.length), 0, id);
+        });
+        return out;
+      }
+      const nowStats = now.stats && typeof now.stats === 'object' ? now.stats : {};
+      const beforeStats = before.stats && typeof before.stats === 'object' ? before.stats : {};
+      return Object.assign({}, now, {
+        customBooks: customBooks,
+        progress: mergeMap(now.progress, before.progress),
+        reviews: mergeMap(now.reviews, before.reviews),
+        userTags: mergeMap(now.userTags, before.userTags),
+        highlights: mergeByBook(now.highlights, before.highlights),
+        bookmarks: mergeByBook(now.bookmarks, before.bookmarks),
+        sessions: mergeByBook(now.sessions, before.sessions),
+        pins: mergeIds(now.pins, before.pins),
+        wishlist: mergeIds(now.wishlist, before.wishlist),
+        shelved: mergeIds(now.shelved, before.shelved),
+        stats: Object.assign({}, nowStats, { byBook: mergeMap(nowStats.byBook, beforeStats.byBook) }),
+        lastBookId: now.lastBookId == null && gone.has(before.lastBookId) ? before.lastBookId : now.lastBookId,
+      });
+    }
+
+    // Undo for a bulk finish / unfinish: only the books the click changed, and only
+    // while they still carry the flag it set — progress made since is kept.
+    function undoFinishedBulk(progress, before, ids, flag) {
+      const map = progress && typeof progress === 'object' ? progress : {};
+      const old = before && typeof before === 'object' ? before : {};
+      let changed = false;
+      const next = Object.assign({}, map);
+      (Array.isArray(ids) ? ids : []).forEach(function each(id) {
+        const current = map[id];
+        if (Boolean(current && current.completed) !== flag) return;
+        changed = true;
+        if (old[id]) next[id] = old[id];
+        else delete next[id];
+      });
+      return changed ? next : map;
+    }
+
     function ReadingApp() {
       useLocaleTick();
       const t = translate;
@@ -48,6 +130,8 @@
       const storageWarned = useRef(false);
       const snapshotWarned = useRef(false);
       const stateRef = useRef(state);
+      const readerRef = useRef(null);
+      const [persistTick, setPersistTick] = useState(0);
       const scrollRef = useRef(null);
       const fileRef = useRef(null);
       const backupRef = useRef(null);
@@ -62,6 +146,7 @@
         };
       }, []);
       stateRef.current = state;
+      readerRef.current = reader;
 
       const allBooks = useMemo(function booksMemo() {
         return BUILTIN_BOOKS.concat(state.customBooks);
@@ -149,7 +234,9 @@
           }
         }, 600);
         return function cleanup() { window.clearTimeout(timer); };
-      }, [state, showToast, t]);
+        // persistTick: an import holds saves off while it runs; bumping it once the
+        // import is over saves the shelf the import ended with.
+      }, [state, showToast, t, persistTick]);
 
       // Restore the remembered library directory on launch and pull folder bodies back
       // into memory, so search, cards and export do not see metadata only. Without a
@@ -430,12 +517,6 @@
         }
       }
 
-      // Fills every disk-backed body into memory once the directory is readable again.
-      // Bodies are now on-demand in the LRU cache (bookChaptersCache) to protect renderer memory.
-      async function hydrateLibraryBodies() {
-        return 0;
-      }
-
       // Browser storage lost everything but the folder survived: the snapshot is the
       // only copy left, so the shelf comes back from it. Bodies stay on disk and load on demand.
       async function adoptFolderSnapshot() {
@@ -516,7 +597,7 @@
         function onKeyDown(event) {
           if (!(event.metaKey || event.ctrlKey)) return;
           if (String(event.key || '').toLowerCase() !== 'o') return;
-          if (currentBookRef.current) return;
+          if (readerRef.current) return;
           event.preventDefault();
           event.stopPropagation();
           const target = resolveContinueBook(allBooks, stateRef.current.progress, stateRef.current.shelved);
@@ -969,12 +1050,25 @@
           showToast(t(want ? 'booksAlreadyFinished' : 'booksAlreadyReading'));
           return;
         }
+        // Only the books this click flips, as they were before it.
+        const before = {};
+        const flipped = (Array.isArray(ids) ? ids : []).filter(function changes(id) {
+          const item = previous.progress[id];
+          if (Boolean(item && item.completed) === want) return false;
+          if (item) before[id] = item;
+          return true;
+        });
         setState(function apply(nextState) {
           return Object.assign({}, nextState, { progress: setBooksFinished(nextState.progress, ids, want, Date.now()).progress });
         });
         showToast(fill(t(want ? 'booksFinishedBulk' : 'booksReadingBulk'), { n: preview.changed }), {
           label: t('undo'),
-          onClick: function restore() { setState(previous); },
+          onClick: function restore() {
+            setState(function undo(current) {
+              const progress = undoFinishedBulk(current.progress, before, flipped, want);
+              return progress === current.progress ? current : Object.assign({}, current, { progress: progress });
+            });
+          },
         });
       }, [showToast, t]);
 
@@ -1172,6 +1266,9 @@
         if (code === 'epub-too-large') return t('epubContentTooLarge');
         if (code === 'epub-unsupported') return t('epubUnsupported');
         if (code === 'epub-invalid' || code === 'epub-empty' || code === 'epub-encrypted') return t('epubError');
+        if (code === 'book-drm') return t('importDrm');
+        if (code === 'book-unsupported') return t('importUnsupportedVariant');
+        if (code === 'book-invalid' || code === 'book-empty') return t('importBookError');
         // Unknown failure: keep the real reason visible so it can be reported instead of guessed at.
         const reason = String(code || '').trim().slice(0, 80);
         if (reason) return fill(t('importFailedReason'), { reason: reason });
@@ -1183,7 +1280,18 @@
       // nothing to probe: metadata always fits, and a body that fails to reach disk
       // keeps its text in memory and says so.
       async function ensureLibraryFolder() {
-        if (fsDirectory) return true;
+        if (fsDirectory) {
+          // After a browser restart the remembered handle says 'prompt'. Ask now,
+          // while the import click still counts as a user gesture — asking from
+          // the first body write is too late and fails the whole batch.
+          try {
+            await fsEnsureDirectory();
+            return true;
+          } catch (error) {
+            showToast(fsFailureText(t, error));
+            return false;
+          }
+        }
         if (!fsLibrarySupported()) {
           showToast(t('importNeedsLibrary'));
           return false;
@@ -1236,6 +1344,8 @@
           }
 
           let jobsCompleted = 0;
+          // Per worker slot: terminate + respawn, rejecting whatever it still holds.
+          const failHandlers = [];
 
           function spawn(workerIndex) {
             const worker = new Worker(url);
@@ -1271,6 +1381,7 @@
               try { worker.terminate(); } catch (e) {}
               if (!broken) workers[workerIndex] = spawn(workerIndex);
             }
+            failHandlers[workerIndex] = handleFailure;
             worker.onerror = function onError(errorEvent) {
               if (errorEvent && typeof errorEvent.preventDefault === 'function') errorEvent.preventDefault();
               handleFailure('parse-worker-crash');
@@ -1292,8 +1403,13 @@
                 const id = ++nextId;
                 const timer = setTimeout(function timeout() {
                   if (!pending.has(id)) return;
+                  const slot = pending.get(id);
                   pending.delete(id);
                   reject(new Error('parse-worker-timeout'));
+                  // A worker stuck on one file stays stuck: every later job would
+                  // wait out its own 60 s behind it. Replace it.
+                  const fail = failHandlers[slot.workerIndex];
+                  if (typeof fail === 'function') fail('parse-worker-timeout');
                 }, 60000);
                 const targetWorkerIndex = id % workers.length;
                 pending.set(id, {
@@ -1301,7 +1417,7 @@
                   resolve: function (res) { clearTimeout(timer); resolve(res); },
                   reject: function (err) { clearTimeout(timer); reject(err); },
                 });
-                const kind = /\.epub$/i.test(file.name) || /epub\+zip/i.test(String(file.type || '')) ? 'epub' : 'text';
+                const kind = bookFileKind(file.name, file.type);
                 try {
                   workers[targetWorkerIndex].postMessage({ id: id, file: file, name: file.name, kind: kind });
                 } catch (error) {
@@ -1462,12 +1578,14 @@
 
         function writeImportedBook(book, file) {
           if (file) {
-            try { fsRememberSource(book.id, file.name, file); } catch (error) { /* body can still be written */ }
+            try { fsRememberSource(book.id, file.name, file, isEpubBook(book)); } catch (error) { /* body can still be written */ }
           }
           if (Array.isArray(book.chapters) && book.chapters.length) {
             setCachedChapters(book.id, book.chapters);
           }
-          return fsWriteNewBookBody(book, { skipImages: true }).then(
+          // An EPUB's pictures come back from its original file; every other
+          // format keeps them only in the .assets folder, so they are written now.
+          return fsWriteNewBookBody(book, { skipImages: isEpubBook(book) }).then(
             function stored() {
               const copy = Object.assign({}, book, {
                 chaptersInFs: true,
@@ -1483,7 +1601,12 @@
             },
             function failed() {
               fsForgetSource(book.id);
-              const copy = Object.assign({}, book, {
+              // The folder did not take it, so memory is the only copy: keep the
+              // chapters (pictures as data URLs the reader can draw), or the book
+              // would sit on the shelf unopenable while its signature blocked any
+              // re-import.
+              const kept = materializeRawImages(book);
+              const copy = Object.assign({}, kept, {
                 chaptersInFs: false,
                 chapterCount: Array.isArray(book.chapters) ? book.chapters.length : 0,
                 chapterIds: chapterIdsOf(book),
@@ -1491,7 +1614,6 @@
                 importSignature: importBookSignature(book),
               });
               delete book.chapters;
-              delete copy.chapters;
               return { stored: copy, unwritten: true };
             }
           );
@@ -1631,17 +1753,16 @@
       }
 
       async function parseFileForImport(file, options) {
-        const isEpub = /\.epub$/i.test(file.name) || String(file.type || '').toLowerCase() === 'application/epub+zip';
-        const isText = /\.(txt|md|markdown)$/i.test(file.name) || /^text\//i.test(file.type || '');
-        if (!isEpub && !isText) throw new Error('wrong-type');
-        if (isEpub) {
+        const kind = bookFileKind(file.name, file.type);
+        if (!kind) throw new Error('wrong-type');
+        if (kind === 'epub') {
           const book = await parseEpubBook(file.name, file, options);
           // Pass the file/Blob directly without loading hundreds of megabytes into ArrayBuffers
-          fsRememberSource(book.id, file.name, file);
+          fsRememberSource(book.id, file.name, file, true);
           return book;
         }
         const buffer = await file.arrayBuffer();
-        return parseImportedBook(file.name, decodeTextBytes(buffer));
+        return parseBookBytesSafely(kind, file.name, new Uint8Array(buffer));
       }
 
       async function importFiles(fileList) {
@@ -1662,7 +1783,11 @@
             await importMany(files);
             return;
           }
-          else if (/\.epub$/i.test(files[0].name) || String(files[0].type || '').toLowerCase() === 'application/epub+zip') showToast(t('importingEpub'));
+          else {
+            const singleKind = bookFileKind(files[0].name, files[0].type);
+            if (singleKind === 'epub') showToast(t('importingEpub'));
+            else if (singleKind && singleKind !== 'text') showToast(t('importingBook'));
+          }
           const books = [];
           const errors = [];
           for (let index = 0; index < files.length; index += 1) {
@@ -1749,6 +1874,10 @@
           showToast(importErrorMessage(error));
         } finally {
           importingRef.current = false;
+          // Every save during the import was skipped, and the last shelf update may
+          // already have rendered: without this nudge it would never reach
+          // localStorage or library.json.
+          setPersistTick(function bump(tick) { return tick + 1; });
         }
       }
 
@@ -1814,11 +1943,41 @@
 
       async function exportBackup() {
         // A body on disk is not in memory until something reads it, and a backup
-        // without the text is not a backup. Pull them in first.
-        await hydrateLibraryBodies().catch(function ignore() { return 0; });
-        const payload = makeBackupPayload(stateRef.current);
+        // without the text is not a backup. Read each one into a copy of the
+        // library — never into state, which keeps bodies on demand.
+        const current = stateRef.current;
+        const books = Array.isArray(current.customBooks) ? current.customBooks : [];
+        let folderReady = null;
+        let missing = 0;
+        const customBooks = [];
+        for (let index = 0; index < books.length; index += 1) {
+          const book = books[index];
+          if (!book || book.chaptersInFs !== true || (Array.isArray(book.chapters) && book.chapters.length)) {
+            customBooks.push(book);
+            continue;
+          }
+          let chapters = null;
+          try {
+            if (folderReady === null) {
+              folderReady = await fsEnsureDirectory().then(function ok() { return true; }, function no() { return false; });
+            }
+            if (folderReady) chapters = await fsReadBookBody(book);
+          } catch (error) {
+            chapters = null;
+          }
+          if (Array.isArray(chapters) && chapters.length) {
+            // The body travels inside the backup, so the restored book must not
+            // claim it lives in a folder: a different folder would not have it.
+            customBooks.push(Object.assign({}, book, { chapters: chapters, chaptersInFs: false }));
+          } else {
+            missing += 1;
+            customBooks.push(book);
+          }
+        }
+        const payload = makeBackupPayload(Object.assign({}, current, { customBooks: customBooks }));
         const ok = downloadTextFile('shiguang-reader-backup-' + dayKey() + '.json', JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
-        showToast(ok ? t('backupExported') : t('exportFailed'));
+        if (!ok) showToast(t('exportFailed'));
+        else showToast(missing ? t('fsBodyMissing') : t('backupExported'));
       }
 
       function exportBooklistPalette() {
@@ -1865,6 +2024,9 @@
           const next = parseBackupPayload(await file.text());
           const previous = stateRef.current;
           setState(next);
+          // persistBodies is a no-op without a mounted folder; a body it cannot write
+          // (an EPUB whose original is not in this folder) stays in state as before.
+          if (fsDirectory) persistBodies(restoredBodiesToPersist(next));
           setReader(null);
           setDetailId(null);
           setTab('shelf');
@@ -1872,7 +2034,18 @@
           showToast(t('backupRestored'), {
             label: t('undo'),
             onClick: function restorePrevious() {
-              setState(previous);
+              // Undoing a restore is meant to bring the whole library back as it
+              // was. The one thing worth keeping from the undo window is a book
+              // that arrived in it (an import finishing): its body is already in
+              // the folder, and dropping its shelf entry would orphan it.
+              setState(function undo(current) {
+                const known = new Set((previous.customBooks || []).concat(next.customBooks || []).map(function id(book) { return book && book.id; }));
+                const arrived = (Array.isArray(current.customBooks) ? current.customBooks : []).filter(function fresh(book) {
+                  return book && !known.has(book.id);
+                });
+                if (!arrived.length) return previous;
+                return Object.assign({}, previous, { customBooks: arrived.concat(previous.customBooks || []) });
+              });
               setTab('shelf');
             },
           });
@@ -1916,6 +2089,21 @@
         importFiles(files);
       }
 
+      // The folder the library used before a re-pick, if it is a different folder
+      // and can still be read — the only place disk-only bodies can come from.
+      async function readablePreviousRoot(previousRoot) {
+        if (!previousRoot || previousRoot === fsDirectory) return null;
+        try {
+          if (typeof previousRoot.isSameEntry === 'function' && await previousRoot.isSameEntry(fsDirectory)) return null;
+          const options = { mode: 'read' };
+          let permission = await previousRoot.queryPermission(options);
+          if (permission !== 'granted') permission = await previousRoot.requestPermission(options);
+          return permission === 'granted' ? previousRoot : null;
+        } catch (error) {
+          return null;
+        }
+      }
+
       // Points the library at a real folder, then moves every existing body into it.
       const chooseLibraryDir = useCallback(async function choose() {
         if (!fsLibrarySupported()) {
@@ -1923,21 +2111,43 @@
           return;
         }
         try {
+          const previousRoot = fsDirectory;
           const info = await fsChooseDirectory();
           await fsEnsureDirectory();
+          const oldRoot = await readablePreviousRoot(previousRoot);
           const books = (stateRef.current.customBooks || []).slice();
+          const written = [];
           const done = [];
           for (let index = 0; index < books.length; index += 1) {
+            const book = books[index];
             try {
-              await fsWriteBookBody(books[index]);
-              done.push(books[index].id);
+              // A body that lives only on disk has nothing in memory to write: an
+              // attempt would replace the text with an empty file. It is either
+              // already in this folder (the same folder picked again, or one moved
+              // here), or its files are carried over from the previous folder.
+              if (book.chaptersInFs === true) {
+                if (await fsHasBookBody(book)) {
+                  done.push(book.id);
+                  continue;
+                }
+                if (oldRoot && await fsCopyBookFromDirectory(oldRoot, book)) {
+                  done.push(book.id);
+                  continue;
+                }
+              }
+              if (!(Array.isArray(book.chapters) && book.chapters.length)) continue;
+              await fsWriteBookBody(book);
+              written.push(book.id);
+              done.push(book.id);
             } catch (error) {
-              /* This book keeps its body in localStorage. */
+              /* This book keeps its body where it was. */
             }
           }
+          // Only books whose chapters were just written get new chapter ids from
+          // them; a book copied or found on disk keeps the ids it already has.
           const next = Object.assign({}, stateRef.current, { fsLibrary: { name: info.name } });
-          if (done.length) {
-            next.customBooks = stripDiskBackedBodies(markBodiesOnDisk(next, done, false), true).customBooks;
+          if (written.length) {
+            next.customBooks = stripDiskBackedBodies(markBodiesOnDisk(next, written), true).customBooks;
           }
           // The snapshot is what the Host reads, so prove it is writable before
           // telling the user the folder is ready — a folder that takes bodies but
@@ -1981,7 +2191,7 @@
           label: t('undo'),
           onClick: function restore() {
             cancelRemoval();
-            setState(previous);
+            setState(function undo(current) { return restoreRemovedBooks(current, previous, preview.removed); });
           },
         });
       }, [showToast, t]);
@@ -2001,7 +2211,7 @@
           label: t('undo'),
           onClick: function restore() {
             cancelRemoval();
-            setState(previous);
+            setState(function undo(current) { return restoreRemovedBooks(current, previous, preview.removed); });
           },
         });
         return preview.removed.length;
@@ -2386,7 +2596,7 @@
           ref: fileRef,
           type: 'file',
           multiple: true,
-          accept: '.txt,.md,.markdown,.epub,text/plain,text/markdown,application/epub+zip',
+          accept: BOOK_FILE_ACCEPT,
           className: 'sr-hidden-input',
           tabIndex: -1,
           'aria-hidden': 'true',

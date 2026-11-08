@@ -84,30 +84,50 @@
       return { text: cut + '…', truncated: true };
     }
 
+    // CJK wraps between any two characters; Latin-script text wraps only at spaces, and a
+    // wrapped line never starts with the space it broke at. A word wider than the whole
+    // line still breaks per character, so every token always makes progress.
     function wrapQuoteText(text, maxWidth, measure) {
       const lines = [];
+      const tokenPattern = /\s+|[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u{20000}-\u{3FFFF}]|[^\s\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF\u{20000}-\u{3FFFF}]+/gu;
       String(text || '').split('\n').forEach(function paragraph(value) {
-        const chars = Array.from(value);
-        if (!chars.length) {
-          lines.push('');
-          return;
-        }
+        const before = lines.length;
+        const tokens = value.match(tokenPattern) || [];
         let line = '';
-        chars.forEach(function add(ch) {
-          const next = line + ch;
-          if (!line || measure(next) <= maxWidth) {
+        function placeByChar(word) {
+          Array.from(word).forEach(function add(ch) {
+            if (!line || measure(line + ch) <= maxWidth) {
+              line += ch;
+              return;
+            }
+            lines.push(line);
+            line = ch;
+          });
+        }
+        tokens.forEach(function add(token) {
+          if (/^\s+$/.test(token)) {
+            if (line) line += token;
+            return;
+          }
+          const next = line + token;
+          if (line ? measure(next) <= maxWidth : measure(token) <= maxWidth) {
             line = next;
             return;
           }
-          if (QUOTE_BREAK_BEFORE.indexOf(ch) >= 0) {
+          const hangs = Array.from(token).every(function punct(ch) { return QUOTE_BREAK_BEFORE.indexOf(ch) >= 0; });
+          if (line && hangs) {
             lines.push(next);
             line = '';
             return;
           }
-          lines.push(line);
-          line = ch;
+          const kept = line.replace(/\s+$/, '');
+          if (kept) lines.push(kept);
+          line = '';
+          placeByChar(token);
         });
+        line = line.replace(/\s+$/, '');
         if (line) lines.push(line);
+        if (lines.length === before) lines.push('');
       });
       return lines;
     }

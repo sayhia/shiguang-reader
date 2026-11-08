@@ -33,19 +33,74 @@
       );
     }
 
+    // What the page renders: the global settings with this book's own settings on top.
+    function effectiveReaderSettings(stored, bookId) {
+      const base = stored && typeof stored === 'object' ? stored : {};
+      const overrides = (base.bookSettings && bookId && base.bookSettings[bookId]) || {};
+      return Object.assign({}, base, overrides);
+    }
+
+    // The settings that reflow the text. Pagination is only redone (and the
+    // reading position re-anchored) when one of these really changes.
+    function readerLayoutSignature(settings, bookId) {
+      const value = settings || {};
+      const imageLayout = (value.imageLayouts && value.imageLayouts[bookId]) || value.imageLayout || 'inline';
+      return [
+        value.fontSize, value.lineHeight, value.fontFamily, value.letterSpacing, value.paragraphSpacing,
+        value.pageWidth, value.layout || 'page', value.writingMode || 'horizontal', imageLayout,
+      ].join('|');
+    }
+
+    // `CSS` in this bundle is the plugin's stylesheet string (styles.js), which hides
+    // the browser's CSS namespace: a bare CSS.escape throws and every anchor lookup
+    // silently failed. Go through window.CSS, with a small fallback.
+    function cssEscapeIdent(value) {
+      const text = String(value);
+      if (typeof window !== 'undefined' && window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(text);
+      return text.replace(/[^a-zA-Z0-9_\u00A0-\uFFFF-]/g, function escapeChar(char) { return '\\' + char; })
+        .replace(/^(-?)([0-9])/, function escapeDigit(match, dash, digit) { return dash + '\\3' + digit + ' '; });
+    }
+
+    // Which page holds a point `offset` px from the start of the chapter's columns.
+    // In two-column mode a "page" is a spread of two columns.
+    function readerAnchorPage(offset, stepSize, spread, count) {
+      const column = Math.max(0, Math.floor((Number(offset) || 0) / Math.max(1, stepSize)));
+      return clamp(spread ? Math.floor(column / 2) : column, 0, Math.max(0, count - 1));
+    }
+
+    // The page-jump box takes a physical page number, the one the page label shows
+    // ("7–8 / 20"); in two-column mode that maps onto the spread holding it.
+    function readerPageJumpIndex(value, spread, totalPages, pageCount) {
+      const total = spread ? Math.max(1, totalPages) : Math.max(1, pageCount);
+      const physical = clamp(Math.round(Number(value) || 1), 1, total);
+      return clamp(spread ? Math.floor((physical - 1) / 2) : physical - 1, 0, Math.max(0, pageCount - 1));
+    }
+
+    // Keys that are preferences rather than a look: changing them does not turn the
+    // preset into "custom" and does not take the place of the settings undo step.
+    const READER_QUIET_SETTING_KEYS = ['speechRate'];
+
     function Reader(props) {
       const t = props.t;
       const book = props.book || {};
       const chapters = Array.isArray(book.chapters) && book.chapters.length
         ? book.chapters
         : [{ id: 'empty-c1', title: book.title || '正文', paragraphs: [] }];
-      const settings = props.settings || {};
+      const storedSettings = props.settings || {};
+      const bookOverrides = (storedSettings.bookSettings && storedSettings.bookSettings[book.id]) || {};
+      // A book that has its own settings opens with the "this book" scope selected,
+      // so the panel edits what the page actually shows.
+      const [settingsScope, setSettingsScope] = useState(Object.keys(bookOverrides).length ? 'book' : 'global');
+      // The book's own settings always apply; the scope only decides where edits are saved.
+      const settings = effectiveReaderSettings(storedSettings, book.id);
       const initialIndex = clamp(Number(props.initialChapterIndex) || 0, 0, Math.max(0, chapters.length - 1));
       const initialPercent = clamp(Number(props.initialPercent) || 0, 0, 1);
 
       const [chapterIndex, setChapterIndex] = useState(initialIndex);
       const [page, setPage] = useState(0);
       const [pageCount, setPageCount] = useState(1);
+      const [totalPages, setTotalPages] = useState(1);
+      const [scrollRatio, setScrollRatio] = useState(0);
       const [chrome, setChrome] = useState(true);
       const [drawer, setDrawer] = useState(null);
       const [notesTab, setNotesTab] = useState('highlights');
@@ -54,6 +109,18 @@
       const [searchCursor, setSearchCursor] = useState(-1);
       const [searchScope, setSearchScope] = useState('book');
       const [settingsOpen, setSettingsOpen] = useState(false);
+      const [settingsTab, setSettingsTab] = useState('appearance');
+      const [savedPulse, setSavedPulse] = useState(false);
+      const [undoAvailable, setUndoAvailable] = useState(false);
+      const [redoAvailable, setRedoAvailable] = useState(false);
+      const [settingsSearchOpen, setSettingsSearchOpen] = useState(false);
+      const [settingsQuery, setSettingsQuery] = useState('');
+      const [railPinned, setRailPinned] = useState(false);
+      const [clearBookConfirm, setClearBookConfirm] = useState(false);
+      const [scrubDraft, setScrubDraft] = useState(null);
+      const [tourOpen, setTourOpen] = useState(function initialTour() {
+        try { return window.localStorage.getItem('sr-reader-tour-v1') !== '1'; } catch (error) { return false; }
+      });
       const [helpOpen, setHelpOpen] = useState(false);
       const [helpCategory, setHelpCategory] = useState('all');
       const [helpQuery, setHelpQuery] = useState('');
@@ -69,30 +136,24 @@
       const activeSelectionColor = selectionColor || settings.highlightColor || 'amber';
       const [bookmarkDraft, setBookmarkDraft] = useState(null);
       const [tts, setTts] = useState({ status: 'idle', index: 0, total: 0, rate: clamp(Number(settings.speechRate) || 1, 0.5, 2), excerpt: '' });
-      const [voices, setVoices] = useState([]);
       const [sleepMinutes, setSleepMinutes] = useState(0);
       const [isFullscreen, setIsFullscreen] = useState(false);
-      const [clockText, setClockText] = useState(function initClock() {
-        return formatClock(new Date());
-      });
-      useEffect(function updateClock() {
-        function tick() { setClockText(formatClock(new Date())); }
-        const timer = setInterval(tick, 20000);
-        return function clear() { clearInterval(timer); };
-      }, []);
       const [cardHighlight, setCardHighlight] = useState(null);
       const [tocOnlyNotes, setTocOnlyNotes] = useState(false);
       const [tocQuery, setTocQuery] = useState('');
       const [notesQuery, setNotesQuery] = useState('');
       const [notesColorFilter, setNotesColorFilter] = useState('all');
-      const [timeMode, setTimeMode] = useState('chapterTime');
-      const [fontQuickOpen, setFontQuickOpen] = useState(false);
+      const [topMenuOpen, setTopMenuOpen] = useState(false);
+      const topMenuRef = useRef(null);
+      const topMoreButtonRef = useRef(null);
+      const topMenuWasOpenRef = useRef(false);
       const [hoverScrub, setHoverScrub] = useState(null);
       const [fontHud, setFontHud] = useState(0);
       const [chapterHud, setChapterHud] = useState(null);
       const [pageJumpOpen, setPageJumpOpen] = useState(false);
       const [pageJumpDraft, setPageJumpDraft] = useState('');
-      const [rulerOpen, setRulerOpen] = useState(Boolean(settings.readingRuler));
+      const [widthDraft, setWidthDraft] = useState(null);
+      const widthDragRef = useRef(false);
       const [rulerY, setRulerY] = useState(160);
       const [jumpReturn, setJumpReturn] = useState(null);
       // A picture in the page is often too small to actually read — a scan, a map,
@@ -104,9 +165,23 @@
       const currentTheme = READER_THEMES.find(function find(themeItem) { return themeItem.id === activeThemeId; }) || READER_THEMES[0];
       const sleepTimerRef = useRef(null);
       const fontHudTimerRef = useRef(null);
+      const savedPulseTimerRef = useRef(null);
+      const settingsPanelRef = useRef(null);
+      const settingsReturnFocusRef = useRef(null);
+      const settingsRef = useRef(settings);
+      const storedSettingsRef = useRef(storedSettings);
+      const settingsScopeRef = useRef(settingsScope);
+      const undoSettingsRef = useRef(null);
+      const redoSettingsRef = useRef(null);
+      settingsRef.current = settings;
+      storedSettingsRef.current = storedSettings;
+      settingsScopeRef.current = settingsScope;
       const chapterHudTimerRef = useRef(null);
       const sessionStartRef = useRef(Date.now());
       const sessionSecondsRef = useRef(0);
+      // The minute the last eye-care reminder fired at. Kept apart from the session
+      // seconds, which are what the reading session reports.
+      const eyeCareMinuteRef = useRef(0);
       const sessionReportedRef = useRef(false);
       const chapterIndexRef = useRef(chapterIndex);
       const onSessionEndRef = useRef(props.onSessionEnd);
@@ -126,6 +201,8 @@
       const suppressTimerRef = useRef(null);
       const readyRef = useRef(false);
       const pointerRef = useRef(null);
+      const touchStartYRef = useRef(0);
+      const rangeScrubRef = useRef(false);
       const noteRef = useRef(null);
       const searchRef = useRef(null);
       const ttsRef = useRef({ active: false, paused: false, chunks: [], offsets: [], index: 0, chapterIndex: 0, lang: 'zh-CN', rate: 1, utterance: null });
@@ -134,6 +211,8 @@
       const chapter = (chapters.length ? chapters[clamp(chapterIndex, 0, Math.max(0, chapters.length - 1))] : null) || { id: '', title: '', paragraphs: [] };
       const offsets = useMemo(function offsetsMemo() { return chapterBaseOffsets(chapter); }, [chapter]);
       const chapterString = useMemo(function textMemo() { return chapterText(chapter); }, [chapter]);
+      const bookHasImages = useMemo(function imageMemo() { return chapters.some(function has(ch) { return ch && ch.images && Object.keys(ch.images).length > 0; }); }, [chapters]);
+      const chapterHasImages = Boolean(chapter && chapter.images && Object.keys(chapter.images).length > 0);
       const chapterHighlights = useMemo(function highlightMemo() {
         return (props.highlights || [])
           .filter(function match(item) {
@@ -146,22 +225,41 @@
           .filter(function match(item) { return item.bookId === book.id; })
           .sort(function order(a, b) { return b.createdAt - a.createdAt; });
       }, [props.bookmarks, book.id]);
+      const chapterBookmarks = useMemo(function chapterBookmarksMemo() {
+        return bookmarksForBook.filter(function inChapter(item) { return item.chapterIndex === chapterIndex; }).slice(0, 5);
+      }, [bookmarksForBook, chapterIndex]);
+      const dockedRail = Boolean(drawer) && typeof window !== 'undefined' && window.innerWidth >= 1100;
       const bookHighlights = useMemo(function bookHighlightsMemo() {
         return props.highlights.filter(function match(item) { return item.bookId === book.id; });
       }, [props.highlights, book.id]);
-      const gap = box.w && box.w < 700 ? 34 : 56;
-      const pageW = box.w;
+      const layout = settings.layout || 'page';
+      const bookImageLayout = (settings.imageLayouts && settings.imageLayouts[book.id]) || settings.imageLayout || 'inline';
+      const scrollMode = layout === 'scroll';
+      const spread = layout === 'spread' && box.w >= 640;
+      const gap = spread && settings.spreadGutter === 'compact' ? 28 : (box.w && box.w < 700 ? 34 : 56);
+      const pageW = spread ? Math.max(120, Math.floor((box.w - gap) / 2)) : box.w;
       const pageH = box.h;
+      const pageAreaSide = typeof window !== 'undefined' ? Math.min(96, Math.max(30, window.innerWidth * 0.07)) : 72;
+      const pageWidthTarget = typeof window === 'undefined' ? 860 : (settings.pageWidth === 'full' && chapterHasImages ? window.innerWidth : pageWidthPixels(settings.pageWidth, settings.pageWidthPx));
+      const marginNotesVisible = settings.marginNotes === true && typeof window !== 'undefined' && window.innerWidth >= 1300 && (window.innerWidth - pageWidthTarget - pageAreaSide * 2) >= 300;
       const step = pageW + gap;
-      const progressPercentValue = pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1);
-      const remainingMinutes = remainingReadingMinutes(chapterString, progressPercentValue);
-      const remainingLabel = remainingMinutes ? fill(t('remainingMinutes'), { n: remainingMinutes }) : t('chapterAlmostDone');
+      const viewStep = spread ? step * 2 : step;
+      const progressPercentValue = scrollMode ? scrollRatio : (pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1));
       const overallBookPct = clamp(Math.round(((chapterIndex + progressPercentValue) / Math.max(1, chapters.length)) * 100), 0, 100);
       const currentBookmark = bookmarksForBook.find(function same(item) {
         return item.chapterIndex === chapterIndex && Math.abs(item.percent - progressPercentValue) < 0.035;
       });
       const peekHighlight = peek ? props.highlights.find(function find(item) { return item.id === peek.id; }) : null;
-      const pageLabel = fill(t('pageOf'), { n: Math.min(page + 1, pageCount), m: pageCount });
+      const pageStart = spread ? page * 2 + 1 : page + 1;
+      const pageEnd = spread ? Math.min(pageStart + 1, totalPages) : pageStart;
+      // The page-jump box counts the same pages as the label: physical pages, so in
+      // two-column mode "7" lands on the spread that shows page 7.
+      const jumpPageTotal = spread ? Math.max(1, totalPages) : pageCount;
+      const pageLabel = scrollMode
+        ? Math.round(scrollRatio * 100) + '%'
+        : spread
+          ? (pageStart === pageEnd ? String(pageStart) : pageStart + '–' + pageEnd) + ' / ' + Math.max(1, totalPages)
+          : fill(t('pageOf'), { n: Math.min(page + 1, pageCount), m: pageCount });
       const searchResultAll = useMemo(function searchAllMemo() {
         return searchBookChapters(chapters, searchText, 80);
       }, [chapters, searchText]);
@@ -190,8 +288,8 @@
         setToolbar(null);
         setPeek(null);
         setFootnote(null);
-        setFontQuickOpen(false);
         setPageJumpOpen(false);
+        setTopMenuOpen(false);
       }, []);
 
       const showChapterHud = useCallback(function announce(chapIndex, chapTitle) {
@@ -203,16 +301,48 @@
         }, 1500);
       }, []);
 
+      // Which page (spread index in two-column mode) holds an element of the chapter.
+      // The columns box and the element sit inside the same translated page track,
+      // so their offset is already measured from the chapter start: no page offset.
+      const anchorPageIndex = useCallback(function locate(container, el, count) {
+        const containerRect = container.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        return readerAnchorPage(elRect.left - containerRect.left, pageW + gap, spread, count);
+      }, [pageW, gap, spread]);
+
+      // Scroll layout: put the reading position at a ratio of the chapter, the same
+      // way the progress slider does (vertical writing scrolls right-to-left).
+      const scrollToRatio = useCallback(function scrollTo(value) {
+        const ratio = clamp(Number(value) || 0, 0, 1);
+        const element = columnsRef.current;
+        if (element) {
+          const vertical = settings.writingMode === 'vertical';
+          const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+          if (vertical) element.scrollLeft = -ratio * max;
+          else element.scrollTop = ratio * max;
+        }
+        setScrollRatio(ratio);
+        currentPercentRef.current = ratio;
+      }, [settings.writingMode]);
+
       const goChapter = useCallback(function go(index, mode, percent, keepDrawer) {
         if (index < 0 || index >= chapters.length) return;
         dismissPopovers();
-        if (!keepDrawer) setDrawer(null);
+        if (!keepDrawer && !railPinned) setDrawer(null);
         setSettingsOpen(false);
         if (mode !== 'start' && mode !== 'last') setChrome(true);
         const targetChapter = chapters[index];
         let target = mode === 'last' ? 'last' : mode === 'page' && typeof percent === 'number' ? { page: Math.round(percent) } : mode === 'anchor' && percent ? { anchorId: String(percent) } : typeof percent === 'number' ? clamp(percent, 0, 1) : 0;
         if (mode === 'resume') {
           target = chapterResumePercent(props.chapterMarks, targetChapter ? targetChapter.id : '');
+        }
+        if (index === chapterIndex && scrollMode && mode !== 'anchor') {
+          // setPage means nothing in the scroll layout: move the scroll position instead.
+          if (target === 'last') scrollToRatio(1);
+          else if (target && typeof target === 'object') scrollToRatio(0);
+          else if (typeof target === 'number' && target > 0) scrollToRatio(target);
+          else if (mode !== 'resume' || typeof percent === 'number') scrollToRatio(0);
+          return;
         }
         if (index === chapterIndex) {
           if (target === 'last') setPage(Math.max(0, pageCount - 1));
@@ -221,17 +351,24 @@
             let el = null;
             try {
               const cleanAId = String(percent).replace(/^#/, '');
-              const esc = CSS.escape(cleanAId);
+              const esc = cssEscapeIdent(cleanAId);
               el = columnsRef.current.querySelector('#' + esc) ||
                    columnsRef.current.querySelector('[name="' + esc + '"]') ||
                    columnsRef.current.querySelector('[data-slug="' + esc.toLowerCase() + '"]');
             } catch (e) {}
             if (el) {
-              const containerRect = columnsRef.current.getBoundingClientRect();
-              const elRect = el.getBoundingClientRect();
-              const stepSize = pageW + gap;
-              const actualLeft = (elRect.left - containerRect.left) + page * stepSize;
-              setPage(clamp(Math.floor(actualLeft / stepSize), 0, Math.max(0, pageCount - 1)));
+              if (scrollMode) {
+                el.scrollIntoView({ block: 'center', inline: 'center' });
+                const element = columnsRef.current;
+                const vertical = settings.writingMode === 'vertical';
+                const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+                const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+                const ratio = max > 0 ? clamp(position / max, 0, 1) : 0;
+                setScrollRatio(ratio);
+                currentPercentRef.current = ratio;
+                return;
+              }
+              setPage(anchorPageIndex(columnsRef.current, el, pageCount));
             }
           }
           else if (typeof target === 'number' && target > 0) setPage(Math.round(clamp(target, 0, 1) * Math.max(0, pageCount - 1)));
@@ -244,80 +381,126 @@
         setAnimate(false);
         setPage(0);
         setChapterIndex(index);
-      }, [chapterIndex, chapters, pageCount, dismissPopovers, props.chapterMarks, showChapterHud]);
-
-      const audioCtxRef = useRef(null);
-      const playPaperSound = useCallback(function playSound() {
-        if (!settings.paperSound) return;
-        try {
-          const AudioContext = window.AudioContext || window.webkitAudioContext;
-          if (!AudioContext) return;
-          if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-          const ctx = audioCtxRef.current;
-          if (ctx.state === 'suspended') ctx.resume();
-          const bufferSize = Math.floor(ctx.sampleRate * 0.042);
-          const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-          const data = buffer.getChannelData(0);
-          for (let i = 0; i < bufferSize; i++) {
-            data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
-          }
-          const noise = ctx.createBufferSource();
-          noise.buffer = buffer;
-          const filter = ctx.createBiquadFilter();
-          filter.type = 'lowpass';
-          filter.frequency.setValueAtTime(650, ctx.currentTime);
-          const gain = ctx.createGain();
-          gain.gain.setValueAtTime(0.045, ctx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.042);
-          noise.connect(filter);
-          filter.connect(gain);
-          gain.connect(ctx.destination);
-          noise.start();
-        } catch (e) {
-          /* audio unavailable or blocked */
-        }
-      }, [settings.paperSound]);
+      }, [chapterIndex, chapters, pageCount, dismissPopovers, props.chapterMarks, showChapterHud, spread, railPinned, scrollMode, scrollToRatio, anchorPageIndex, settings.writingMode]);
 
       const nextPage = useCallback(function next() {
+        if (scrollMode) {
+          dismissPopovers();
+          const element = columnsRef.current;
+          if (!element) return;
+          const vertical = settings.writingMode === 'vertical';
+          const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+          const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+          if (max - position > 8) {
+            const amount = Math.max(160, (vertical ? element.clientWidth : element.clientHeight) * 0.82);
+            element.scrollBy({ left: vertical ? -amount : 0, top: vertical ? 0 : amount, behavior: 'smooth' });
+            return;
+          }
+          if (chapterIndex < chapters.length - 1) {
+            goChapter(chapterIndex + 1, 'start');
+            return;
+          }
+          props.onFinish(book.id);
+          props.showToast(t('readerFinished'));
+          return;
+        }
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page < pageCount - 1) {
-          playPaperSound();
           setPage(page + 1);
           return;
         }
         if (chapterIndex < chapters.length - 1) {
-          playPaperSound();
           goChapter(chapterIndex + 1, 'start');
           return;
         }
         props.onFinish(book.id);
         props.showToast(t('readerFinished'));
-      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, playPaperSound, props.onFinish, props.showToast, t]);
+      }, [book.id, chapterIndex, chapters.length, dismissPopovers, goChapter, page, pageCount, pageH, pageW, props.onFinish, props.showToast, t, scrollMode, settings.writingMode]);
 
       const prevPage = useCallback(function previous() {
+        if (scrollMode) {
+          dismissPopovers();
+          const element = columnsRef.current;
+          if (!element) return;
+          const vertical = settings.writingMode === 'vertical';
+          const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+          if (position > 8) {
+            const amount = Math.max(160, (vertical ? element.clientWidth : element.clientHeight) * 0.82);
+            element.scrollBy({ left: vertical ? amount : 0, top: vertical ? 0 : -amount, behavior: 'smooth' });
+            return;
+          }
+          if (chapterIndex > 0) {
+            goChapter(chapterIndex - 1, 'last');
+            return;
+          }
+          props.showToast(t('firstPage'));
+          return;
+        }
         if (!pageW || !pageH) return;
         dismissPopovers();
         if (page > 0) {
-          playPaperSound();
           setPage(page - 1);
           return;
         }
         if (chapterIndex > 0) {
-          playPaperSound();
           goChapter(chapterIndex - 1, 'last');
           return;
         }
         props.showToast(t('firstPage'));
-      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, playPaperSound, props.showToast, t]);
+      }, [chapterIndex, dismissPopovers, goChapter, page, pageH, pageW, props.showToast, t, scrollMode, settings.writingMode]);
 
-      const applySettings = useCallback(function update(patch) {
-        if ('fontSize' in patch || 'lineHeight' in patch || 'fontFamily' in patch || 'letterSpacing' in patch || 'paragraphSpacing' in patch || 'pageWidth' in patch) {
+      const applySettings = useCallback(function update(rawPatch, options) {
+        const patch = Object.assign({}, rawPatch);
+        if (patch.marginNotes === true) { patch.chapterRail = false; patch.marginFootnotes = false; }
+        if (patch.chapterRail === true) { patch.marginNotes = false; patch.marginFootnotes = false; }
+        if (patch.marginFootnotes === true) { patch.marginNotes = false; patch.chapterRail = false; }
+        if (patch.writingMode === 'vertical') patch.layout = 'scroll';
+        if (patch.layout && patch.layout !== 'scroll' && settingsRef.current.writingMode === 'vertical') patch.writingMode = 'horizontal';
+        if (patch.marginFootnotes === true && typeof window !== 'undefined' && window.innerWidth < 760) patch.marginFootnotes = false;
+        if (patch.marginNotes === true && typeof window !== 'undefined' && window.innerWidth < 1300) patch.marginNotes = false;
+        // A quiet change (read-aloud speed, the ruler shortcut) is a preference, not a
+        // new look: the preset stays as it is and the undo step keeps the last real edit.
+        const quiet = (options && options.quiet === true) || Object.keys(patch).every(function isQuiet(key) {
+          return READER_QUIET_SETTING_KEYS.indexOf(key) >= 0;
+        });
+        const next = quiet || Object.prototype.hasOwnProperty.call(patch, 'preset')
+          ? patch
+          : Object.assign({ preset: 'custom' }, patch);
+        const storedNow = storedSettingsRef.current || {};
+        const bookScope = settingsScopeRef.current === 'book';
+        const existing = (storedNow.bookSettings && storedNow.bookSettings[book.id]) || {};
+        const storedNext = bookScope
+          ? Object.assign({}, storedNow, { bookSettings: Object.assign({}, storedNow.bookSettings || {}, { [book.id]: Object.assign({}, existing, next) }) })
+          : Object.assign({}, storedNow, next);
+        // Only re-anchor when the text really reflows. Picking the value that is
+        // already selected would otherwise leave progress saving switched off
+        // (nothing re-paginates to switch it back on) and a stale target behind.
+        if (readerLayoutSignature(settingsRef.current, book.id) !== readerLayoutSignature(effectiveReaderSettings(storedNext, book.id), book.id)) {
           pendingRef.current = currentPercentRef.current;
           readyRef.current = false;
         }
-        props.onUpdateSettings(patch);
-      }, [props.onUpdateSettings]);
+        if (!quiet) {
+          undoSettingsRef.current = { active: settingsRef.current, scope: settingsScopeRef.current, stored: storedSettingsRef.current };
+          redoSettingsRef.current = null;
+          setUndoAvailable(true);
+          setRedoAvailable(false);
+        }
+        if (bookScope) {
+          props.onUpdateSettings({ bookSettings: storedNext.bookSettings });
+        } else {
+          props.onUpdateSettings(next);
+        }
+        if ('layout' in patch || 'writingMode' in patch) {
+          props.showToast(t('layoutPositionKept'));
+        }
+        setSavedPulse(true);
+        if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        savedPulseTimerRef.current = window.setTimeout(function clearSaved() {
+          savedPulseTimerRef.current = null;
+          setSavedPulse(false);
+        }, 3000);
+      }, [book.id, props.onUpdateSettings, props.showToast, t]);
 
       // A short-lived "Aa 20px" HUD so keyboard resizing is visible without opening a panel.
       const showFontHud = useCallback(function announce(size) {
@@ -370,6 +553,28 @@
         };
       }, []);
 
+      useEffect(function clearSavedTimer() {
+        return function cleanup() {
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+        };
+      }, []);
+
+      useEffect(function settingsFocusLifecycle() {
+        if (settingsOpen) {
+          settingsReturnFocusRef.current = document.activeElement;
+          const frame = window.requestAnimationFrame(function focusTab() {
+            const target = document.getElementById('sr-settings-tab-' + settingsTab);
+            if (target) target.focus();
+          });
+          return function cleanup() { window.cancelAnimationFrame(frame); };
+        }
+        const previous = settingsReturnFocusRef.current;
+        settingsReturnFocusRef.current = null;
+        if (previous && typeof previous.focus === 'function') {
+          try { previous.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
+        }
+        return undefined;
+      }, [settingsOpen]);
       useEffect(function focusReader() {
         if (readerRef.current) {
           try { readerRef.current.focus({ preventScroll: true }); } catch (error) { /* ignore */ }
@@ -458,6 +663,7 @@
       }, []);
 
       useEffect(function bindWheelSwipe() {
+        if (scrollMode) return undefined;
         const element = stageRef.current;
         if (!element || typeof element.addEventListener !== 'function') return undefined;
         let deltaAccum = 0;
@@ -485,7 +691,7 @@
         return function unbind() {
           element.removeEventListener('wheel', onWheel);
         };
-      }, [nextPage, prevPage]);
+      }, [nextPage, prevPage, scrollMode]);
 
       useEffect(function watchSystemTheme() {
         if (typeof window === 'undefined' || !window.matchMedia) return;
@@ -509,6 +715,12 @@
         return function cleanup() { alive = false; };
       }, []);
 
+      useEffect(function resetSettingsScroll() {
+        if (!settingsOpen) return;
+        const panel = settingsPanelRef.current;
+        if (panel) panel.scrollTop = 0;
+      }, [settingsOpen, settingsTab]);
+
       useEffect(function enableAnimation() {
         if (animate) return undefined;
         const frame = window.requestAnimationFrame(function turnOn() { setAnimate(true); });
@@ -516,6 +728,12 @@
       }, [animate, chapterIndex]);
 
       useLayoutEffect(function paginate() {
+        if (scrollMode) {
+          setPageCount(1);
+          setTotalPages(1);
+          readyRef.current = true;
+          return undefined;
+        }
         const element = columnsRef.current;
         if (!element || !pageW || !pageH) return;
         const stepSize = pageW + gap;
@@ -527,7 +745,9 @@
           const endColumn = Math.round((endRect.left - containerRect.left) / stepSize) + 1;
           measuredCount = Math.max(measuredCount, endColumn);
         }
-        const nextCount = Math.max(1, measuredCount);
+        const totalColumns = Math.max(1, measuredCount);
+        const nextCount = Math.max(1, spread ? Math.ceil(totalColumns / 2) : totalColumns);
+        setTotalPages(totalColumns);
         setPageCount(nextCount);
         let target = pageRef.current;
         if (pendingRef.current !== null) {
@@ -537,17 +757,12 @@
             let el = null;
             try {
               const cleanAId = String(pendingRef.current.anchorId).replace(/^#/, '');
-              const esc = CSS.escape(cleanAId);
+              const esc = cssEscapeIdent(cleanAId);
               el = element.querySelector('#' + esc) ||
                    element.querySelector('[name="' + esc + '"]') ||
                    element.querySelector('[data-slug="' + esc.toLowerCase() + '"]');
             } catch (e) {}
-            if (el) {
-              const containerRect = element.getBoundingClientRect();
-              const elRect = el.getBoundingClientRect();
-              const actualLeft = (elRect.left - containerRect.left) + pageRef.current * stepSize;
-              target = clamp(Math.floor(actualLeft / stepSize), 0, nextCount - 1);
-            }
+            if (el) target = anchorPageIndex(element, el, nextCount);
           }
           else target = Math.round(clamp(Number(pendingRef.current) || 0, 0, 1) * Math.max(0, nextCount - 1));
           pendingRef.current = null;
@@ -561,13 +776,63 @@
           setProgressTick(function bump(value) { return value + 1; });
         });
         return function cleanup() { window.cancelAnimationFrame(frame); };
-      }, [book.id, chapter.id, chapterIndex, pageW, pageH, gap, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, fontTick, chapterHighlights.length]);
+      }, [book.id, chapter.id, chapterIndex, pageW, pageH, gap, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, settings.writingMode, layout, bookImageLayout, fontTick, chapterHighlights.length, spread, scrollMode, anchorPageIndex]);
+
+      useEffect(function clearWidthDraft() {
+        if (!settingsOpen) {
+          widthDragRef.current = false;
+          setWidthDraft(null);
+        }
+      }, [settingsOpen]);
 
       useEffect(function reportProgress() {
         if (!readyRef.current) return;
-        const percent = pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1);
+        const percent = scrollMode ? scrollRatio : (pageCount <= 1 ? 0 : clamp(page / (pageCount - 1), 0, 1));
         props.onProgress(book.id, chapterIndex, percent);
-      }, [book.id, chapterIndex, page, pageCount, progressTick, props.onProgress]);
+      }, [book.id, chapterIndex, page, pageCount, progressTick, props.onProgress, scrollMode, scrollRatio]);
+
+      useEffect(function alignScrollChapter() {
+        if (!scrollMode) return undefined;
+        const element = columnsRef.current;
+        if (!element) return undefined;
+        let target = pendingRef.current;
+        if (target === null || target === undefined) {
+          target = chapterIndex === initialIndex
+            ? (currentPercentRef.current || initialPercent)
+            : 0;
+        }
+        let ratio = 0;
+        let anchorId = '';
+        if (target === 'last') ratio = 1;
+        else if (typeof target === 'number') ratio = clamp(target, 0, 1);
+        else if (target && typeof target === 'object' && typeof target.percent === 'number') ratio = clamp(target.percent, 0, 1);
+        else if (target && typeof target === 'object' && target.page !== undefined && pageCount > 1) ratio = clamp(target.page / (pageCount - 1), 0, 1);
+        else if (target && typeof target === 'object' && target.anchorId) anchorId = String(target.anchorId);
+        pendingRef.current = null;
+        const frame = window.requestAnimationFrame(function scrollTo() {
+          if (anchorId) {
+            let anchor = null;
+            try {
+              const cleanAId = anchorId.replace(/^#/, '');
+              const esc = cssEscapeIdent(cleanAId);
+              anchor = element.querySelector('#' + esc) || element.querySelector('[name="' + esc + '"]') || element.querySelector('[data-slug="' + esc.toLowerCase() + '"]');
+            } catch (e) { /* ignore */ }
+            if (anchor) anchor.scrollIntoView({ block: 'center', inline: 'center' });
+          }
+          const vertical = settings.writingMode === 'vertical';
+          const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+          if (!anchorId) {
+            if (vertical) element.scrollLeft = -ratio * max;
+            else element.scrollTop = ratio * max;
+          }
+          const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+          const actualRatio = anchorId && max > 0 ? clamp(position / max, 0, 1) : ratio;
+          setScrollRatio(actualRatio);
+          currentPercentRef.current = actualRatio;
+          readyRef.current = true;
+        });
+        return function cleanup() { window.cancelAnimationFrame(frame); };
+      }, [scrollMode, chapterIndex, initialIndex, initialPercent, pageCount, layout, settings.fontSize, settings.lineHeight, settings.fontFamily, settings.letterSpacing, settings.paragraphSpacing, settings.pageWidth, settings.writingMode, bookImageLayout, fontTick]);
 
       const addSecondsRef = useRef(props.onAddSeconds);
       addSecondsRef.current = props.onAddSeconds;
@@ -641,7 +906,7 @@
             if (bookmarkDraft) { setBookmarkDraft(null); return; }
             if (noteDraft) { setNoteDraft(null); return; }
             if (settingsOpen) { setSettingsOpen(false); return; }
-            if (fontQuickOpen) { setFontQuickOpen(false); return; }
+            if (topMenuOpen) { setTopMenuOpen(false); return; }
             if (drawer) { setDrawer(null); return; }
             if (toolbar || peek || footnote) { dismissPopovers(); return; }
             if (!chrome) { setChrome(true); return; }
@@ -658,24 +923,22 @@
             if (plainKey === 'f') { event.preventDefault(); toggleFullscreen(); return; }
             if (plainKey === 'l') {
               event.preventDefault();
-              const next = !(settings.readingRuler || rulerOpen);
-              setRulerOpen(next);
-              applySettings({ readingRuler: next });
-              props.showToast(next ? t('rulerOn') : t('rulerOff'));
+              const next = (settings.readingGuide || 'none') === 'ruler' ? 'none' : 'ruler';
+              applySettings({ readingGuide: next }, { quiet: true });
+              props.showToast(next === 'ruler' ? t('rulerOn') : t('rulerOff'));
               return;
             }
             if (plainKey === 'g') {
               event.preventDefault();
               dismissPopovers();
-              setPageJumpDraft(String(page + 1));
+              setPageJumpDraft(String(pageStart));
               setPageJumpOpen(true);
               return;
             }
             if (plainKey === 'u' || event.key === 'Backspace') {
               if (jumpReturn) {
                 event.preventDefault();
-                goChapter(jumpReturn.chapterIndex, 'page', jumpReturn.page);
-                setJumpReturn(null);
+                returnFromJump();
                 return;
               }
             }
@@ -686,6 +949,19 @@
             if (event.key === '[') { event.preventDefault(); if (chapterIndex > 0) goChapter(chapterIndex - 1, 'resume'); return; }
           }
           if (tag === 'BUTTON' && (event.key === ' ' || event.key === 'Enter')) return;
+          if (scrollMode && !event.metaKey && !event.ctrlKey && !event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+            const element = columnsRef.current;
+            if (element) {
+              event.preventDefault();
+              const vertical = settings.writingMode === 'vertical';
+              if (vertical) {
+                element.scrollBy({ left: event.key === 'ArrowLeft' ? 96 : -96, behavior: 'smooth' });
+              } else {
+                element.scrollBy({ top: event.key === 'ArrowDown' ? 96 : -96, behavior: 'smooth' });
+              }
+            }
+            return;
+          }
           const action = readerKeyAction(event.key, {
             meta: event.metaKey,
             ctrl: event.ctrlKey,
@@ -705,34 +981,50 @@
           if (action === 'firstPage') {
             event.preventDefault();
             dismissPopovers();
-            setPage(0);
+            if (scrollMode) scrollToRatio(0);
+            else setPage(0);
             return;
           }
           if (action === 'lastPage') {
             event.preventDefault();
             dismissPopovers();
-            setPage(Math.max(0, pageCount - 1));
+            if (scrollMode) scrollToRatio(1);
+            else setPage(Math.max(0, pageCount - 1));
             return;
           }
         }
         window.addEventListener('keydown', onKey);
         return function cleanup() { window.removeEventListener('keydown', onKey); };
-      }, [bookmarkDraft, changeFontSize, chrome, dismissPopovers, drawer, fontQuickOpen, helpOpen, nextPage, noteDraft, page, pageCount, pageJumpOpen, peek, prevPage, props.onExit, resetFontSize, settingsOpen, toolbar, toggleBookmark, toggleFullscreen, toggleSpeech, zoomImage]);
+      }, [applySettings, bookmarkDraft, changeFontSize, chapterIndex, chapters.length, chrome, dismissPopovers, drawer, goChapter, helpOpen, jumpReturn, nextPage, noteDraft, page, pageCount, pageJumpOpen, pageStart, peek, prevPage, props.onExit, props.showToast, resetFontSize, scrollMode, scrollToRatio, settings.readingGuide, settings.writingMode, settingsOpen, t, toolbar, topMenuOpen, toggleBookmark, toggleFullscreen, toggleSpeech, zoomImage]);
 
       useEffect(function dismissOnOutside() {
-        if (!toolbar && !peek && !fontQuickOpen && !pageJumpOpen) return undefined;
+        if (!toolbar && !peek && !pageJumpOpen && !topMenuOpen) return undefined;
         function onDown(event) {
           const target = event.target;
           if (target && typeof target.closest === 'function') {
             if (target.closest('.sr-selection-toolbar') || target.closest('.sr-hl-peek')) return;
-            if (target.closest('.sr-font-quick') || target.closest('.sr-font-anchor')) return;
             if (target.closest('.sr-page-jump-popover') || target.closest('.sr-page-jump-trigger')) return;
+            if (target.closest('.sr-top-more') || target.closest('.sr-top-more-trigger')) return;
           }
           dismissPopovers();
         }
         document.addEventListener('pointerdown', onDown, true);
         return function cleanup() { document.removeEventListener('pointerdown', onDown, true); };
-      }, [dismissPopovers, fontQuickOpen, pageJumpOpen, peek, toolbar]);
+      }, [dismissPopovers, pageJumpOpen, peek, toolbar, topMenuOpen]);
+
+      useEffect(function returnTopMenuFocus() {
+        if (topMenuWasOpenRef.current && !topMenuOpen && topMoreButtonRef.current) topMoreButtonRef.current.focus();
+        topMenuWasOpenRef.current = topMenuOpen;
+      }, [topMenuOpen]);
+
+      useEffect(function focusTopMenu() {
+        if (!topMenuOpen || !topMenuRef.current) return undefined;
+        const frame = window.requestAnimationFrame(function focus() {
+          const first = topMenuRef.current && topMenuRef.current.querySelector('button');
+          if (first) first.focus();
+        });
+        return function cleanup() { window.cancelAnimationFrame(frame); };
+      }, [topMenuOpen]);
 
       useEffect(function focusPageJump() {
         if (!pageJumpOpen) return;
@@ -846,21 +1138,6 @@
         };
       }, []);
 
-      useEffect(function loadSpeechVoices() {
-        if (typeof window === 'undefined' || !window.speechSynthesis) return undefined;
-        const synth = window.speechSynthesis;
-        function load() {
-          try { setVoices(synth.getVoices() || []); } catch (error) { setVoices([]); }
-        }
-        load();
-        if (synth.addEventListener) synth.addEventListener('voiceschanged', load);
-        else synth.onvoiceschanged = load;
-        return function cleanup() {
-          if (synth.removeEventListener) synth.removeEventListener('voiceschanged', load);
-          else if (synth.onvoiceschanged === load) synth.onvoiceschanged = null;
-        };
-      }, []);
-
       useEffect(function syncSpeechRate() {
         const rate = clamp(Number(settings.speechRate) || 1, 0.5, 2);
         ttsRef.current.rate = rate;
@@ -897,19 +1174,59 @@
       }, [chapterIndex]);
 
       useEffect(function autoHideControls() {
-        if (!settings.autoHideChrome || !chrome) return undefined;
+        if (!settings.immersive || !chrome) return undefined;
         if (drawer || settingsOpen || noteDraft || toolbar || peek) return undefined;
         const timer = window.setTimeout(function hideControls() {
           setChrome(false);
         }, 6000);
         return function cleanup() { window.clearTimeout(timer); };
-      }, [settings.autoHideChrome, chrome, drawer, settingsOpen, noteDraft, toolbar, peek, page, chapterIndex]);
+      }, [settings.immersive, chrome, drawer, settingsOpen, noteDraft, toolbar, peek, page, chapterIndex]);
+
+      useEffect(function applyImmersiveDefault() {
+        setChrome(!settings.immersive);
+      }, [settings.immersive]);
+
+      useEffect(function revealChromeAtEdges() {
+        if (!settings.immersive) return undefined;
+        const element = readerRef.current;
+        if (!element || typeof element.addEventListener !== 'function') return undefined;
+        let hideTimer = null;
+        function scheduleHide() {
+          if (hideTimer) window.clearTimeout(hideTimer);
+          hideTimer = window.setTimeout(function hide() {
+            hideTimer = null;
+            if (!drawer && !settingsOpen && !noteDraft && !toolbar && !peek) setChrome(false);
+          }, 2800);
+        }
+        function onMove(event) {
+          const rect = element.getBoundingClientRect();
+          const y = event.clientY - rect.top;
+          if (y < 56 || y > rect.height - 56) {
+            setChrome(true);
+            scheduleHide();
+          }
+        }
+        function onLeave() {
+          if (!drawer && !settingsOpen && !noteDraft && !toolbar && !peek) setChrome(false);
+        }
+        element.addEventListener('pointermove', onMove);
+        element.addEventListener('pointerleave', onLeave);
+        return function cleanup() {
+          if (hideTimer) window.clearTimeout(hideTimer);
+          element.removeEventListener('pointermove', onMove);
+          element.removeEventListener('pointerleave', onLeave);
+        };
+      }, [settings.immersive, drawer, settingsOpen, noteDraft, toolbar, peek]);
+
+      useEffect(function centerFocusBand() {
+        if (settings.readingGuide === 'focus' && box.h) setRulerY(Math.round(box.h * 0.45));
+      }, [settings.readingGuide, box.h]);
 
       useEffect(function eyeCareTimer() {
         const timer = setInterval(function checkRest() {
           const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 60000);
-          if (elapsed > 0 && elapsed % 30 === 0 && sessionSecondsRef.current !== elapsed) {
-            sessionSecondsRef.current = elapsed;
+          if (elapsed > 0 && elapsed % 30 === 0 && eyeCareMinuteRef.current !== elapsed) {
+            eyeCareMinuteRef.current = elapsed;
             props.showToast(fill(t('eyeCareReminderHint'), { n: elapsed }));
           }
         }, 60000);
@@ -940,10 +1257,11 @@
         } catch (error) {
           return null;
         }
+        // Measured in the paragraph's rendered text; selectionHighlightRange maps it
+        // back to raw offsets through the paragraph's inline map.
         const local = range.toString().length;
-        const base = offsets.offsets[index];
-        if (typeof base !== 'number') return null;
-        return { paragraph: index, absolute: base + local };
+        if (typeof offsets.offsets[index] !== 'number') return null;
+        return { paragraph: index, local: local };
       }
 
       function popoverPosition(rect, halfWidth) {
@@ -982,14 +1300,11 @@
         const first = locatePoint(range.startContainer, range.startOffset);
         const second = locatePoint(range.endContainer, range.endOffset);
         if (!first || !second) return;
-        let startOffset = Math.min(first.absolute, second.absolute);
-        let endOffset = Math.max(first.absolute, second.absolute);
-        const raw = chapterString.slice(startOffset, endOffset);
-        if (!raw.trim()) return;
-        startOffset += raw.length - raw.trimStart().length;
-        endOffset -= raw.length - raw.trimEnd().length;
-        const text = chapterString.slice(startOffset, endOffset);
-        if (!text.trim()) return;
+        const picked = selectionHighlightRange(chapter.paragraphs, offsets.offsets, paragraphLayout.maps, first, second);
+        if (!picked) return;
+        const startOffset = picked.start;
+        const endOffset = picked.end;
+        const text = picked.text;
         suppressNextClick();
         const rect = range.getBoundingClientRect();
         const position = popoverPosition(rect, 215);
@@ -1004,6 +1319,21 @@
         });
         setPeek(null);
         try { selection.removeAllRanges(); } catch (error) { /* ignore */ }
+      }
+
+      function handleRootTouchStart(event) {
+        if (!event.touches || !event.touches[0]) return;
+        touchStartYRef.current = event.touches[0].clientY;
+      }
+
+      function handleRootTouchEnd() {
+        if (!settings.immersive) return;
+        if (drawer || settingsOpen || noteDraft) return;
+        const element = readerRef.current;
+        if (!element) return;
+        const rect = element.getBoundingClientRect();
+        const y = touchStartYRef.current - rect.top;
+        if (y < 64 || y > rect.height - 64) setChrome(true);
       }
 
       function handleStageClick(event) {
@@ -1056,7 +1386,7 @@
           if (cleanTargetId && (isNoteRef || !targetPath)) {
             let el = null;
             try {
-              const esc = CSS.escape(cleanTargetId);
+              const esc = cssEscapeIdent(cleanTargetId);
               el = (columnsRef.current && (
                 columnsRef.current.querySelector('#' + esc) ||
                 columnsRef.current.querySelector('[name="' + esc + '"]') ||
@@ -1129,22 +1459,28 @@
           if (cleanTargetId && (!targetPath || targetPath === (chapter.href || '') || targetPath === (chapter.path || ''))) {
             let el = null;
             try {
-              const esc = CSS.escape(cleanTargetId);
+              const esc = cssEscapeIdent(cleanTargetId);
               el = (columnsRef.current && (
                 columnsRef.current.querySelector('#' + esc) ||
                 columnsRef.current.querySelector('[name="' + esc + '"]') ||
                 columnsRef.current.querySelector('[data-slug="' + esc.toLowerCase() + '"]')
               )) || document.getElementById(cleanTargetId);
             } catch (e) { /* ignore */ }
-            if (el && columnsRef.current) {
+            if (el && columnsRef.current && columnsRef.current.contains(el)) {
               dismissPopovers();
-              const containerRect = columnsRef.current.getBoundingClientRect();
-              const elRect = el.getBoundingClientRect();
-              const stepSize = pageW + gap;
-              const actualLeft = (elRect.left - containerRect.left) + page * stepSize;
-              const targetPage = Math.floor(actualLeft / stepSize);
-              setJumpReturn({ chapterIndex: chapterIndex, page: page });
-              setPage(clamp(targetPage, 0, Math.max(0, pageCount - 1)));
+              rememberJumpReturn();
+              if (scrollMode) {
+                el.scrollIntoView({ block: 'center', inline: 'center' });
+                const element = columnsRef.current;
+                const vertical = settings.writingMode === 'vertical';
+                const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+                const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+                const ratio = max > 0 ? clamp(position / max, 0, 1) : 0;
+                setScrollRatio(ratio);
+                currentPercentRef.current = ratio;
+                return;
+              }
+              setPage(anchorPageIndex(columnsRef.current, el, pageCount));
               return;
             }
           }
@@ -1182,7 +1518,7 @@
 
           if (targetChapIdx >= 0) {
             dismissPopovers();
-            setJumpReturn({ chapterIndex: chapterIndex, page: page });
+            rememberJumpReturn();
             if (cleanTargetId) {
               goChapter(targetChapIdx, 'anchor', cleanTargetId);
             } else {
@@ -1200,8 +1536,8 @@
         if (drawer || settingsOpen || noteDraft) return;
         const rect = event.currentTarget.getBoundingClientRect();
         const ratio = (event.clientX - rect.left) / Math.max(1, rect.width);
-        if (ratio < 0.24) prevPage();
-        else if (ratio > 0.76) nextPage();
+        if (ratio < 0.12) prevPage();
+        else if (ratio > 0.88) nextPage();
         else setChrome(function toggle(value) { return !value; });
       }
 
@@ -1329,6 +1665,25 @@
         props.showToast(t('thoughtSaved'));
       }
 
+      // Where "return" brings the reader back to. The percent is what counts in the
+      // scroll layout, where there is only ever one "page".
+      function rememberJumpReturn() {
+        setJumpReturn({ chapterIndex: chapterIndex, page: page, percent: currentPercentRef.current });
+      }
+
+      function returnFromJump() {
+        const previous = jumpReturn;
+        if (!previous) return;
+        setJumpReturn(null);
+        if (scrollMode) {
+          goChapter(previous.chapterIndex, 'percent', typeof previous.percent === 'number' ? previous.percent : 0);
+        } else if (previous.chapterIndex === chapterIndex) {
+          setPage(clamp(previous.page, 0, Math.max(0, pageCount - 1)));
+        } else {
+          goChapter(previous.chapterIndex, 'page', previous.page);
+        }
+      }
+
       function jumpToHighlight(item) {
         const targetChapter = chapters[item.chapterIndex];
         const total = targetChapter ? chapterText(targetChapter).length : 0;
@@ -1343,11 +1698,6 @@
       function pickSpeechVoice(lang) {
         try {
           const available = window.speechSynthesis.getVoices() || [];
-          const preferred = settings.speechVoice;
-          if (preferred) {
-            const chosen = available.find(function voice(item) { return (item.voiceURI || item.name) === preferred || item.name === preferred; });
-            if (chosen) return chosen;
-          }
           const exact = available.find(function voice(item) { return String(item.lang || '').toLowerCase() === String(lang).toLowerCase(); });
           if (exact) return exact;
           const base = String(lang).split('-')[0].toLowerCase();
@@ -1410,8 +1760,18 @@
         });
         if (session.offsets && typeof session.offsets[index] === 'number' && chapterString.length > 0) {
           const targetPercent = clamp(session.offsets[index] / chapterString.length, 0, 1);
-          const targetPage = Math.round(targetPercent * Math.max(0, countRef.current - 1));
-          if (targetPage !== pageRef.current) setPage(targetPage);
+          if (scrollMode && columnsRef.current) {
+            const element = columnsRef.current;
+            const vertical = settings.writingMode === 'vertical';
+            const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+            if (vertical) element.scrollLeft = -targetPercent * max;
+            else element.scrollTop = targetPercent * max;
+            setScrollRatio(targetPercent);
+            currentPercentRef.current = targetPercent;
+          } else {
+            const targetPage = Math.round(targetPercent * Math.max(0, countRef.current - 1));
+            if (targetPage !== pageRef.current) setPage(targetPage);
+          }
         }
         utterance.onend = function onEnd() {
           if (!session.active) return;
@@ -1543,6 +1903,11 @@
         props.showToast(t('bookmarkAdded'));
       }
 
+      function dismissTour() {
+        setTourOpen(false);
+        try { window.localStorage.setItem('sr-reader-tour-v1', '1'); } catch (error) { /* ignore */ }
+      }
+
       function closeTopOverlay() {
         if (noteDraft) { setNoteDraft(null); return; }
         if (settingsOpen) { setSettingsOpen(false); return; }
@@ -1552,14 +1917,19 @@
         setFootnote(null);
       }
 
-      function segmentParagraph(text, base, highlights) {
+      // Highlights are stored in raw paragraph offsets; `map` (inlineOffsetMap) turns
+      // them into rendered positions, so a highlight on a paragraph with `**`,
+      // `[^n]` or link syntax wraps the words the reader chose and never splits a
+      // Markdown token.
+      function segmentParagraph(map, base, highlights) {
+        const length = map.rendered.length;
         const ranges = [];
         highlights.forEach(function collect(item) {
-          const start = clamp(item.start - base, 0, text.length);
-          const end = clamp(item.end - base, 0, text.length);
+          const start = clamp(inlineRenderedOffset(map, item.start - base, 'start'), 0, length);
+          const end = clamp(inlineRenderedOffset(map, item.end - base, 'end'), 0, length);
           if (end > start) ranges.push({ item: item, start: start, end: end });
         });
-        if (!ranges.length) return renderInline(text, 'p-' + base);
+        if (!ranges.length) return renderInlineRange(map, 0, length, 'p-' + base);
         ranges.sort(function order(a, b) { return a.start - b.start; });
         const nodes = [];
         let cursor = 0;
@@ -1567,7 +1937,7 @@
           const start = Math.max(cursor, item.start);
           const end = Math.max(start, item.end);
           if (start > cursor) {
-            nodes.push.apply(nodes, renderInline(text.slice(cursor, start), 'r-' + base + '-' + cursor));
+            nodes.push.apply(nodes, renderInlineRange(map, cursor, start, 'r-' + base + '-' + cursor));
           }
           if (end > start) {
             const color = HIGHLIGHT_COLORS.find(function find(entry) { return entry.id === item.item.color; }) || HIGHLIGHT_COLORS[0];
@@ -1578,18 +1948,21 @@
               'data-style': item.item.style || 'highlight',
               'data-note': item.item.note ? 'true' : 'false',
               style: { '--sr-hl': color.value },
-            }, renderInline(text.slice(start, end), 'hl-' + base + '-' + start)));
+            }, renderInlineRange(map, start, end, 'hl-' + base + '-' + start)));
           }
           cursor = Math.max(cursor, end);
         });
-        if (cursor < text.length) {
-          nodes.push.apply(nodes, renderInline(text.slice(cursor), 'r-' + base + '-' + cursor));
+        if (cursor < length) {
+          nodes.push.apply(nodes, renderInlineRange(map, cursor, length, 'r-' + base + '-' + cursor));
         }
         return nodes;
       }
 
-      const paragraphNodes = useMemo(function calcNodes() {
-        return chapter.paragraphs.map(function paragraph(text, index) {
+      // The nodes, and for each paragraph drawn through segmentParagraph its inline
+      // offset map (other paragraphs show their clean raw text, so they need none).
+      const paragraphLayout = useMemo(function calcNodes() {
+        const maps = [];
+        const nodes = chapter.paragraphs.map(function paragraph(text, index) {
           // A picture line is a place in the text where the book had a picture. The
           // bytes live in the chapter's image map (loaded from the folder), so an
           // illustrated page looks like one instead of showing `![图注](img-1-1.jpg)`.
@@ -1624,18 +1997,32 @@
             return h('p', { key: index, 'data-p': index, className: 'sr-figure-missing' },
               t('imageMissing', { name: picture.name }));
           }
-          const trimmed = text.trim();
+          let safeText = text;
+          if (!safeText.includes('<blockquote')) safeText = safeText.replace(/<\/blockquote\s*>/gi, '');
+          if (!safeText.includes('<table')) safeText = safeText.replace(/<\/table\s*>/gi, '');
+          if (!safeText.includes('<aside')) safeText = safeText.replace(/<\/aside\s*>/gi, '');
+          if (!safeText.includes('<figure')) safeText = safeText.replace(/<\/figure\s*>/gi, '');
+          if (!safeText.includes('<pre')) safeText = safeText.replace(/<\/pre\s*>/gi, '');
+          if (!safeText.includes('<ul')) safeText = safeText.replace(/<\/ul\s*>/gi, '');
+          if (!safeText.includes('<ol')) safeText = safeText.replace(/<\/ol\s*>/gi, '');
+          const trimmed = safeText.trim();
+          if (!trimmed) return null;
+
+          // 0. Drop orphaned container tags so they never render as plain text
+          if (/^<\/?(?:blockquote|table|aside|figure|pre|code|ul|ol|li|div|p|span|section|article|h[1-6])\s*>$/i.test(trimmed)) {
+            return null;
+          }
 
           // 1. EPUB Rich HTML block (ruby, strong, em, table, blockquote, footnotes, headings)
-          if (/<[a-z0-9]+\b[^>]*>/i.test(text)) {
+          if (/<\/?([a-z0-9]+)\b[^>]*>/i.test(safeText)) {
             const base = offsets.offsets[index];
-            const cleanLen = stripHtmlTags(text).length;
+            const cleanLen = stripHtmlTags(safeText).length;
             const relevantHls = chapterHighlights.filter(function(h) {
               return h.end > base && h.start < base + cleanLen;
             });
-            const renderedHtml = applyHtmlHighlights(text, base, relevantHls);
+            const renderedHtml = applyHtmlHighlights(sanitizeReaderHtml(safeText), base, relevantHls);
 
-            if (trimmed.startsWith('<table') && trimmed.endsWith('</table>')) {
+            if (/^<table\b/i.test(trimmed)) {
               return h('div', {
                 key: index,
                 'data-p': index,
@@ -1646,40 +2033,95 @@
                 dangerouslySetInnerHTML: { __html: renderedHtml }
               });
             }
-            if (trimmed.startsWith('<blockquote') && trimmed.endsWith('</blockquote>')) {
+            if (/^<blockquote\b/i.test(trimmed)) {
+              const bqIdMatch = trimmed.match(/^<blockquote\b[^>]*\bid=["']([^"']+)["']/i);
+              const bqClassMatch = trimmed.match(/^<blockquote\b[^>]*\bclass=["']([^"']+)["']/i);
+              const bqInner = renderedHtml.replace(/^<blockquote\b[^>]*>/i, '').replace(/<\/blockquote\s*>$/i, '');
               return h('blockquote', {
                 key: index,
                 'data-p': index,
-                className: 'sr-quote',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<blockquote\b[^>]*>/i, '').replace(/<\/blockquote>$/i, '') }
+                id: bqIdMatch ? bqIdMatch[1] : undefined,
+                className: 'sr-quote' + (bqClassMatch ? ' ' + bqClassMatch[1] : ''),
+                dangerouslySetInnerHTML: { __html: bqInner }
               });
             }
-            if (/^<h[1-6]\b/i.test(trimmed) && /<\/h[1-6]>$/i.test(trimmed)) {
+            if (/^<h[1-6]\b/i.test(trimmed)) {
               const Tag = trimmed.slice(1, 3).toLowerCase();
               return h(Tag, {
                 key: index,
                 'data-p': index,
                 className: 'sr-subheading',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<h[1-6]\b[^>]*>/i, '').replace(/<\/h[1-6]>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<h[1-6]\b[^>]*>/i, '').replace(/<\/h[1-6]\s*>$/i, '') }
               });
             }
-            if (/^<aside\b/i.test(trimmed) && /<\/aside>$/i.test(trimmed)) {
+            if (/^<aside\b/i.test(trimmed)) {
               const idMatch = trimmed.match(/\bid=["']([^"']+)["']/i);
               return h('aside', {
                 key: index,
                 'data-p': index,
                 id: idMatch ? idMatch[1] : undefined,
                 className: 'sr-aside-note',
-                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<aside\b[^>]*>/i, '').replace(/<\/aside>$/i, '') }
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<aside\b[^>]*>/i, '').replace(/<\/aside\s*>$/i, '') }
               });
             }
             if (trimmed.startsWith('<hr')) {
               return h('div', { key: index, 'data-p': index, className: 'sr-divider-wrap' }, h('hr', { className: 'sr-divider' }));
             }
+            if (/^<pre\b/i.test(trimmed)) {
+              const codeMatch = trimmed.match(/^<pre\b[^>]*><code\b(?:\s+class=["']([^"']*)["'])?[^>]*>([\s\S]*?)<\/code><\/pre\s*>$/i);
+              const langMatch = (codeMatch && codeMatch[1] && codeMatch[1].match(/(?:language-|lang-)?([a-z0-9_-]+)/i)) || trimmed.match(/class=["'](?:language-|lang-|brush:\s*)?([a-z0-9_-]+)/i);
+              const lang = (langMatch && langMatch[1]) ? langMatch[1].toUpperCase() : '';
+              const preInner = renderedHtml.replace(/^<pre\b[^>]*>/i, '').replace(/<\/pre\s*>$/i, '');
+              const plainCode = stripHtmlTags(preInner);
+              return h('div', {
+                key: index,
+                'data-p': index,
+                className: 'sr-code-container',
+                role: 'region',
+                'aria-label': (lang ? lang + ' ' : '') + t('codeBlock'),
+              },
+                h('div', { className: 'sr-code-header' },
+                  h('span', { className: 'sr-code-lang' }, lang || 'CODE'),
+                  h('button', {
+                    type: 'button',
+                    className: 'sr-code-copy-btn',
+                    'aria-label': t('copyShort'),
+                    onClick: function onCopy(e) {
+                      e.stopPropagation();
+                      copyTextToClipboard(plainCode).then(function() {
+                        props.showToast(t('copied'));
+                      });
+                    },
+                  }, t('copyShort')),
+                ),
+                h('pre', {
+                  className: 'sr-code-pre',
+                  tabIndex: 0,
+                  dangerouslySetInnerHTML: { __html: preInner }
+                })
+              );
+            }
+            if (/^<(?:ul|ol)\b/i.test(trimmed)) {
+              const Tag = trimmed.startsWith('<ol') ? 'ol' : 'ul';
+              return h(Tag, {
+                key: index,
+                'data-p': index,
+                style: { margin: 'calc(var(--sr-para-gap,.9em) * .8) 0', paddingLeft: '1.8em', textIndent: 0 },
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<(?:ul|ol)\b[^>]*>/i, '').replace(/<\/(?:ul|ol)\s*>$/i, '') }
+              });
+            }
+            if (/^<figure\b/i.test(trimmed)) {
+              return h('figure', {
+                key: index,
+                'data-p': index,
+                className: 'sr-figure',
+                dangerouslySetInnerHTML: { __html: renderedHtml.replace(/^<figure\b[^>]*>/i, '').replace(/<\/figure\s*>$/i, '') }
+              });
+            }
             const pIdMatch = trimmed.match(/^<p\b[^>]*\bid=["']([^"']+)["']/i);
             const pClassMatch = trimmed.match(/^<p\b[^>]*\bclass=["']([^"']+)["']/i);
             const pInnerHtml = /^<p\b[^>]*>/i.test(renderedHtml)
-              ? renderedHtml.replace(/^<p\b[^>]*>/i, '').replace(/<\/p>$/i, '')
+              ? renderedHtml.replace(/^<p\b[^>]*>/i, '').replace(/<\/p\s*>$/i, '')
               : renderedHtml;
             return h('p', {
               key: index,
@@ -1690,8 +2132,8 @@
             });
           }
 
-          // 2. Divider line (***, ---, ___, ❦, etc.)
-          const isDivider = trimmed === '***' || trimmed === '---' || trimmed === '___' || trimmed === '———' || trimmed === '···' || trimmed === '❦' || trimmed === '~~~';
+          // 2. Divider line (***, ---, ___, ~~~, ❦, etc.)
+          const isDivider = /^([*\-_~=—·❦]\s*){3,}$/.test(trimmed) || trimmed === '❦' || trimmed === '···' || trimmed === '———';
           if (isDivider) {
             return h('div', {
               key: index,
@@ -1701,13 +2143,23 @@
           }
 
           // 2. Fenced code block (```lang ... ``` or ~~~lang ... ~~~)
-          if ((trimmed.startsWith('```') || trimmed.startsWith('~~~')) && (text.includes('\n') || trimmed.length > 3)) {
+          const isFencedBlock = (function checkFenced() {
+            if (!trimmed.startsWith('```') && !trimmed.startsWith('~~~')) return false;
+            const fence = trimmed.startsWith('```') ? '```' : '~~~';
+            if (text.includes('\n')) return true;
+            const afterOpen = trimmed.slice(fence.length).trim();
+            return afterOpen.includes(fence);
+          })();
+
+          if (isFencedBlock) {
             const lines = text.split('\n');
             const firstLine = lines[0].trim();
             const fence = firstLine.startsWith('```') ? '```' : '~~~';
-            const lang = firstLine.slice(fence.length).trim();
+            const lang = firstLine.slice(fence.length).trim().replace(/[^a-zA-Z0-9_#-]/g, '');
             const lastLine = lines[lines.length - 1].trim();
-            const codeLines = lines.slice(1, (lines.length > 1 && lastLine.startsWith(fence)) ? lines.length - 1 : lines.length);
+            const codeLines = lines.length > 1
+              ? lines.slice(1, (lines.length > 1 && lastLine.startsWith(fence)) ? lines.length - 1 : lines.length)
+              : [trimmed.slice(fence.length, trimmed.lastIndexOf(fence)).trim()];
             const codeContent = codeLines.join('\n');
 
             return h('div', {
@@ -1892,7 +2344,7 @@
               className: 'sr-subheading',
               id: headingSlug || ('h-' + index),
               'data-slug': headingSlug,
-            }, segmentParagraph(headingClean, offsets.offsets[index], chapterHighlights));
+            }, segmentParagraph(maps[index] = inlineOffsetMap(headingClean, (text.length - text.trimStart().length) + (trimmed.length - headingMatch[2].length)), offsets.offsets[index], chapterHighlights));
           }
 
           // 9. Traditional verse & quotes
@@ -1905,9 +2357,23 @@
             key: index,
             'data-p': index,
             className: pClass,
-          }, segmentParagraph(text, offsets.offsets[index], chapterHighlights));
+          }, segmentParagraph(maps[index] = inlineOffsetMap(text, 0), offsets.offsets[index], chapterHighlights));
         });
+        return { nodes: nodes, maps: maps };
       }, [chapter.id, chapter.paragraphs, chapter.images, chapterHighlights, offsets]);
+      const paragraphNodes = paragraphLayout.nodes;
+
+      function railPinButton() {
+        if (!dockedRail) return null;
+        return h('button', {
+          type: 'button',
+          className: 'sr-reader-icon sr-rail-pin',
+          'data-on': railPinned ? 'true' : 'false',
+          title: railPinned ? t('unpinRail') : t('pinRail'),
+          'aria-label': railPinned ? t('unpinRail') : t('pinRail'),
+          onClick: function togglePin() { setRailPinned(!railPinned); },
+        }, h(Icon, { name: 'pin', size: 14 }));
+      }
 
       function drawerNotes() {
         const q = notesQuery.trim().toLowerCase();
@@ -1929,8 +2395,9 @@
           });
 
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer sr-drawer--right', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('bookNotes') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer ' + (dockedRail ? 'sr-drawer--docked' : 'sr-drawer--left'), role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('bookNotes') },
+            railPinButton(),
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.author),
@@ -2007,7 +2474,7 @@
                         h('div', { className: 'sr-drawer-note-foot' },
                           h('span', { className: 'sr-drawer-note-meta' }, (noteChapter ? noteChapter.title : '') + ' · ' + dateLabel(note.createdAt)),
                           h('div', { className: 'sr-drawer-note-actions' },
-                            h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToHighlight(note); } }, t('jumpToText')),
+                            h('button', { type: 'button', className: 'sr-mini-action', onClick: function jump() { rememberJumpReturn(); jumpToHighlight(note); } }, t('jumpToText')),
                             h('button', {
                               type: 'button',
                               className: 'sr-mini-action',
@@ -2031,7 +2498,7 @@
                   ? h('div', { className: 'sr-drawer-empty' }, h(Icon, { name: 'bookmark', size: 24 }), h('div', null, t('noBookmarks')))
                   : filteredBookmarks.map(function bookmark(item) {
                     return h('div', { key: item.id, className: 'sr-bookmark-row' },
-                      h('button', { type: 'button', className: 'sr-bookmark-main', onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); goChapter(item.chapterIndex, 'percent', item.percent); } },
+                      h('button', { type: 'button', className: 'sr-bookmark-main', onClick: function jump() { rememberJumpReturn(); goChapter(item.chapterIndex, 'percent', item.percent); } },
                         h('strong', null, item.chapterTitle || (chapters[item.chapterIndex] ? chapters[item.chapterIndex].title : '')),
                         item.excerpt ? h('span', { className: 'sr-bookmark-excerpt' }, item.excerpt) : null,
                         item.note ? h('span', { className: 'sr-bookmark-note' }, item.note) : null,
@@ -2087,8 +2554,9 @@
         });
         const readCount = overview.filter(function read(item) { return item.read; }).length;
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerToc') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer' + (dockedRail ? ' sr-drawer--docked' : ''), role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('readerToc') },
+            railPinButton(),
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.author),
@@ -2139,7 +2607,7 @@
                   title: item.current
                     ? t('currentChapter')
                     : (marked > 0 ? fill(t('tocReadPercent'), { n: Math.round(marked * 100) }) : ''),
-                  onClick: function open() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); goChapter(item.index, 'resume'); },
+                  onClick: function open() { rememberJumpReturn(); goChapter(item.index, 'resume'); },
                 },
                   h('span', { className: 'sr-toc-num' }, item.read ? h(Icon, { name: 'check', size: 10 }) : String(item.index + 1).padStart(2, '0')),
                   h('span', { className: 'sr-toc-copy' },
@@ -2183,8 +2651,9 @@
         const isChapter = searchScope === 'chapter';
         const results = searchResult.results;
         return h(React.Fragment, null,
-          h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
-          h('aside', { className: 'sr-drawer sr-drawer--right sr-drawer--search', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('searchInBook') },
+          dockedRail ? null : h('div', { className: 'sr-scrim', onClick: function close() { setDrawer(null); } }),
+          h('aside', { className: 'sr-drawer ' + (dockedRail ? 'sr-drawer--docked' : 'sr-drawer--left') + ' sr-drawer--search', role: dockedRail ? 'complementary' : 'dialog', 'aria-modal': dockedRail ? 'false' : 'true', 'aria-label': t('searchInBook') },
+            railPinButton(),
             h('div', { className: 'sr-drawer-head' },
               h('div', { className: 'sr-drawer-head-main' },
                 h('div', { className: 'sr-drawer-kicker' }, book.title),
@@ -2316,7 +2785,7 @@
                           type: 'button',
                           className: 'sr-search-result',
                           'data-active': index === searchCursor ? 'true' : 'false',
-                          onClick: function jump() { setJumpReturn({ chapterIndex: chapterIndex, page: page }); jumpToSearchResult(item, index); },
+                          onClick: function jump() { rememberJumpReturn(); jumpToSearchResult(item, index); },
                         },
                           h('div', { className: 'sr-search-result-head' },
                             h('span', { className: 'sr-search-result-chapter' }, item.chapterTitle),
@@ -2358,118 +2827,346 @@
       }
 
       function settingsSheet() {
-        return h(React.Fragment, null,
-          h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
-          h('div', { className: 'sr-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings') },
-            h('div', { className: 'sr-sheet-head' },
-              h('strong', null, t('readerSettings')),
-              h('div', { className: 'sr-sheet-head-actions' },
-                h('button', {
-                  type: 'button',
-                  className: 'sr-reader-icon',
-                  onClick: function help() { setSettingsOpen(false); setHelpOpen(true); },
-                  title: t('shortcuts'),
-                  'aria-label': t('shortcuts'),
-                }, h(Icon, { name: 'help', size: 16 })),
-                h('button', { type: 'button', className: 'sr-reader-icon', onClick: function close() { setSettingsOpen(false); }, title: t('close'), 'aria-label': t('close') },
-                  h(Icon, { name: 'close', size: 16 }),
-                ),
-              ),
+        const themeName = settings.theme === 'auto'
+          ? t('themeAuto') + ' · ' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1))
+          : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1));
+        const defaultPageWidth = (typeof window !== 'undefined' && window.innerWidth < 760) ? 'compact' : 'comfortable';
+        const pageWidthLabel = settings.pageWidth === 'custom'
+          ? settings.pageWidthPx + 'px'
+          : settings.pageWidth === 'compact' ? t('widthCompact')
+            : settings.pageWidth === 'wide' ? t('widthWide')
+              : settings.pageWidth === 'full' ? t('widthFull')
+                : t('widthComfortable');
+        const dirtySettings = {
+          appearance: settings.theme !== 'paper' || (settings.highlightColor || 'amber') !== 'amber',
+          typography: settings.fontSize !== 19 || settings.lineHeight !== 1.95 || settings.fontFamily !== 'serif' || settings.letterSpacing !== 0.02 || settings.paragraphSpacing !== 0.9 || bookImageLayout !== 'inline' || (settings.writingMode || 'horizontal') !== 'horizontal',
+          layout: (settings.layout || 'page') !== 'page' || settings.immersive === true || settings.marginNotes === true || settings.marginFootnotes === true || settings.chapterRail === true || (settings.spreadGutter || 'comfortable') !== 'comfortable' || settings.spreadRule === false,
+          reading: (settings.readingGuide || 'none') !== 'none' || settings.pageWidth !== defaultPageWidth || (settings.dockMode || 'auto') !== 'auto',
+        };
+        const dirtyCount = Object.keys(dirtySettings).filter(function key(name) { return dirtySettings[name]; }).length;
+        const settingsTabs = [
+          { id: 'appearance', label: t('settingsTabAppearance') },
+          { id: 'typography', label: t('settingsTabTypography') },
+          { id: 'layout', label: t('settingsTabLayout') },
+          { id: 'reading', label: t('settingsTabReading') },
+        ];
+        function typeField(field) {
+          return h('div', {
+            key: field.id,
+            className: 'sr-type-field' + (field.full ? ' sr-type-field--full' : ''),
+            'data-setting': field.id,
+          },
+            h('div', { className: 'sr-type-label' },
+              h('span', null, field.label),
+              field.value ? h('em', null, field.value) : null,
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' },
-                t('theme'),
-                h('span', null, settings.theme === 'auto'
-                  ? (t('themeAuto') + ' · ' + t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
-                  : t('theme' + activeThemeId.charAt(0).toUpperCase() + activeThemeId.slice(1)))
-              ),
-              h('div', { className: 'sr-theme-grid' },
-                READER_THEMES.map(function swatch(themeItem) {
-                  return h('button', {
-                    key: themeItem.id,
-                    type: 'button',
-                    className: 'sr-theme-swatch',
-                    'aria-pressed': settings.theme === themeItem.id,
-                    'aria-label': t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1)),
-                    style: { '--sw-bg': themeItem.bg, '--sw-ink': themeItem.ink },
-                    onClick: function pick() { applySettings({ theme: themeItem.id }); },
-                  },
-                    h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))),
-                    settings.theme === themeItem.id ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
-                  );
-                }),
-                h('button', {
-                  key: 'auto',
+            field.control,
+          );
+        }
+        function readingRow(row) {
+          return h('div', { key: row.id, className: 'sr-settings-row', 'data-setting': row.id },
+            h('div', { className: 'sr-settings-row-copy' },
+              h('strong', null, row.label),
+              h('p', null, row.hint),
+            ),
+            h('button', {
+              type: 'button',
+              role: 'switch',
+              className: 'sr-switch',
+              'aria-checked': row.checked,
+              'aria-label': row.label,
+              onClick: row.onToggle,
+            }, h('span', { className: 'sr-switch-thumb' })),
+          );
+        }
+        const presetSettings = {
+          classic: {
+            preset: 'classic', theme: 'paper', pageWidthPx: 860, layout: 'page', spreadGutter: 'comfortable', spreadRule: true, fontFamily: 'serif', fontSize: 19,
+            lineHeight: 1.95, pageWidth: 'comfortable', letterSpacing: 0.02, paragraphSpacing: 0.9,
+            immersive: false, dockMode: 'standard', readingGuide: 'none',
+            imageLayout: 'inline', writingMode: 'horizontal',
+          },
+          magazine: {
+            preset: 'magazine', theme: 'snow', pageWidthPx: 1120, layout: 'spread', spreadGutter: 'compact', spreadRule: false, fontFamily: 'sans', fontSize: 18,
+            lineHeight: 1.8, pageWidth: 'wide', letterSpacing: 0.015, paragraphSpacing: 1.05,
+            immersive: false, dockMode: 'standard', readingGuide: 'none',
+            imageLayout: 'wide', writingMode: 'horizontal',
+          },
+          minimal: {
+            preset: 'minimal', theme: 'paper', pageWidthPx: 860, layout: 'page', spreadGutter: 'comfortable', spreadRule: true, fontFamily: 'serif', fontSize: 19,
+            lineHeight: 1.9, pageWidth: 'comfortable', letterSpacing: 0.02, paragraphSpacing: 0.9,
+            immersive: true, dockMode: 'minimal', readingGuide: 'none',
+            imageLayout: 'inline', writingMode: 'horizontal',
+          },
+        };
+        function applyPreset(name) {
+          const next = presetSettings[name];
+          if (next) {
+            const imageLayout = next.imageLayout || 'inline';
+            applySettings(Object.assign({}, next, {
+              imageLayouts: Object.assign({}, settings.imageLayouts || {}, { [book.id]: imageLayout }),
+            }));
+          }
+        }
+        function resetCurrentTab() {
+          if (settingsTab === 'appearance') {
+            applySettings({ theme: 'paper', highlightColor: 'amber' });
+          } else if (settingsTab === 'typography') {
+            applySettings({ fontFamily: 'serif', fontSize: 19, lineHeight: 1.95, letterSpacing: 0.02, paragraphSpacing: 0.9, imageLayout: 'inline', imageLayouts: imageLayoutsWithoutBook(), writingMode: 'horizontal' });
+          } else if (settingsTab === 'layout') {
+            applySettings({
+              layout: 'page', immersive: false,
+              chapterRail: false, marginNotes: false, marginFootnotes: false,
+              spreadGutter: 'comfortable', spreadRule: true,
+            });
+          } else {
+            applySettings(readingTabDefaults());
+          }
+        }
+        // The page this book renders picks its picture layout from imageLayouts first,
+        // so a reset has to drop the book's entry there as well.
+        function imageLayoutsWithoutBook() {
+          const next = Object.assign({}, settings.imageLayouts || {});
+          delete next[book.id];
+          return next;
+        }
+        // Same values a fresh install starts with (see defaultState): auto dock and a
+        // page width that suits the screen, so phones keep the thumb dock and the
+        // compact width.
+        function readingTabDefaults() {
+          const narrow = typeof window !== 'undefined' && window.innerWidth < 760;
+          return { readingGuide: 'none', dockMode: 'auto', pageWidth: narrow ? 'compact' : 'comfortable', pageWidthPx: narrow ? 680 : 860 };
+        }
+        function resetAllSettings() {
+          applySettings(Object.assign({}, presetSettings.classic, readingTabDefaults(), {
+            highlightColor: 'amber',
+            marginNotes: false, marginFootnotes: false, chapterRail: false,
+            imageLayouts: imageLayoutsWithoutBook(),
+          }));
+        }
+        function restoreSettingsSnapshot(snapshot) {
+          const current = storedSettingsRef.current || {};
+          let patch;
+          if (snapshot.scope === 'book') {
+            const stored = snapshot.stored || {};
+            const overrides = Object.assign({}, current.bookSettings || {});
+            const previous = (stored.bookSettings && stored.bookSettings[book.id]) || null;
+            if (previous) overrides[book.id] = previous;
+            else delete overrides[book.id];
+            patch = { bookSettings: overrides };
+          } else {
+            // The global settings as they were. snapshot.active has this book's own
+            // settings merged in, which must not leak into the global ones.
+            patch = Object.assign({}, snapshot.stored || snapshot.active, { bookSettings: current.bookSettings || {} });
+          }
+          if (readerLayoutSignature(settingsRef.current, book.id) !== readerLayoutSignature(effectiveReaderSettings(Object.assign({}, current, patch), book.id), book.id)) {
+            pendingRef.current = currentPercentRef.current;
+            readyRef.current = false;
+          }
+          props.onUpdateSettings(patch);
+        }
+        function undoLastSettings() {
+          const snapshot = undoSettingsRef.current;
+          if (!snapshot) return;
+          redoSettingsRef.current = { active: settingsRef.current, scope: settingsScopeRef.current, stored: storedSettingsRef.current };
+          setRedoAvailable(true);
+          undoSettingsRef.current = null;
+          setUndoAvailable(false);
+          setSavedPulse(false);
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+          restoreSettingsSnapshot(snapshot);
+        }
+        function redoLastSettings() {
+          const snapshot = redoSettingsRef.current;
+          if (!snapshot) return;
+          undoSettingsRef.current = { active: settingsRef.current, scope: settingsScopeRef.current, stored: storedSettingsRef.current };
+          setUndoAvailable(true);
+          redoSettingsRef.current = null;
+          setRedoAvailable(false);
+          setSavedPulse(false);
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+          restoreSettingsSnapshot(snapshot);
+        }
+        function clearBookOverrides() {
+          if (!clearBookConfirm) { setClearBookConfirm(true); return; }
+          const stored = storedSettingsRef.current;
+          undoSettingsRef.current = { active: settingsRef.current, scope: settingsScopeRef.current, stored: stored };
+          setUndoAvailable(true);
+          setClearBookConfirm(false);
+          const overrides = Object.assign({}, stored.bookSettings || {});
+          delete overrides[book.id];
+          if (readerLayoutSignature(settingsRef.current, book.id) !== readerLayoutSignature(stored, book.id)) {
+            pendingRef.current = currentPercentRef.current;
+            readyRef.current = false;
+          }
+          props.onUpdateSettings({ bookSettings: overrides });
+          setSavedPulse(true);
+          if (savedPulseTimerRef.current) window.clearTimeout(savedPulseTimerRef.current);
+          savedPulseTimerRef.current = window.setTimeout(function clearSaved() { savedPulseTimerRef.current = null; setSavedPulse(false); }, 3000);
+        }
+        function trapSettingsFocus(event) {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            setSettingsOpen(false);
+            return;
+          }
+          if (event.key !== 'Tab') return;
+          const focusables = Array.from(event.currentTarget.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
+            .filter(function visible(element) { return element.offsetParent !== null; });
+          if (!focusables.length) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+        const searchItems = [
+          { tab: 'appearance', id: '', label: t('theme') },
+          { tab: 'appearance', id: '', label: t('highlightColor') },
+          { tab: 'typography', id: 'font-family', label: t('fontFamily') },
+          { tab: 'typography', id: 'font-size', label: t('fontSize') },
+          { tab: 'typography', id: 'line-height', label: t('lineHeight') },
+          { tab: 'typography', id: 'letter-spacing', label: t('letterSpacing') },
+          { tab: 'typography', id: 'paragraph-spacing', label: t('paragraphSpacing') },
+          { tab: 'reading', id: 'page-width', label: t('pageWidth') },
+          { tab: 'layout', id: '', label: t('readingPreset') },
+          { tab: 'layout', id: '', label: t('readingLayout') },
+          { tab: 'layout', id: 'immersive', label: t('immersive') },
+          { tab: 'layout', id: 'margin-aux', label: t('marginAux') },
+          { tab: 'reading', id: 'dock-mode', label: t('dockMode') },
+          { tab: 'layout', id: '', label: t('spreadGutter') },
+          { tab: 'layout', id: '', label: t('spreadRule') },
+          { tab: 'typography', id: 'font-family', label: t('fontSerif') },
+          { tab: 'typography', id: 'font-family', label: t('fontSans') },
+          { tab: 'typography', id: 'font-family', label: t('fontKai') },
+          { tab: 'reading', id: 'reading-guide', label: t('readingGuide') },
+          { tab: 'reading', id: '', label: t('speechRate') },
+        ];
+        const searchResults = settingsQuery.trim()
+          ? searchItems.filter(function match(item) { return item.label.toLowerCase().indexOf(settingsQuery.trim().toLowerCase()) >= 0; }).slice(0, 6)
+          : [];
+        function goToSetting(item) {
+          setSettingsTab(item.tab);
+          setSettingsSearchOpen(false);
+          setSettingsQuery('');
+          window.requestAnimationFrame(function first() {
+            window.requestAnimationFrame(function second() {
+              if (!item.id) {
+                const panel = settingsPanelRef.current;
+                if (panel) panel.scrollTop = 0;
+                return;
+              }
+              const target = document.querySelector('[data-setting="' + item.id + '"]');
+              if (target) {
+                const details = target.closest('details');
+                if (details) details.open = true;
+                target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+              }
+            });
+          });
+        }
+        const appearancePanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('theme')),
+              h('em', null, themeName),
+            ),
+            h('div', { className: 'sr-settings-theme-grid' },
+              READER_THEMES.filter(function visible(themeItem) { return ['paper', 'candle', 'snow', 'night', 'eink'].indexOf(themeItem.id) >= 0; }).map(function swatch(themeItem) {
+                return h('button', {
+                  key: themeItem.id,
                   type: 'button',
-                  className: 'sr-theme-swatch sr-theme-swatch--auto',
-                  'aria-pressed': settings.theme === 'auto',
-                  'aria-label': t('themeAuto'),
-                  title: t('themeAuto'),
-                  style: { '--sw-bg': 'linear-gradient(to right, #f3ede2 0%, #f3ede2 50%, #151a1d 50%, #151a1d 100%)', '--sw-ink': '#322920' },
-                  onClick: function pick() { applySettings({ theme: 'auto' }); },
+                  className: 'sr-theme-swatch',
+                  'aria-pressed': settings.theme === themeItem.id,
+                  'aria-label': t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1)),
+                  style: { '--sw-bg': themeItem.bg, '--sw-ink': themeItem.ink },
+                  onClick: function pick() { applySettings({ theme: themeItem.id }); },
                 },
-                  h('span', null, t('themeAuto')),
-                  settings.theme === 'auto' ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
-                ),
+                  h('span', null, t('theme' + themeItem.id.charAt(0).toUpperCase() + themeItem.id.slice(1))),
+                  settings.theme === themeItem.id ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
+                );
+              }),
+              h('button', {
+                type: 'button',
+                className: 'sr-theme-swatch sr-theme-swatch--auto',
+                'aria-pressed': settings.theme === 'auto',
+                'aria-label': t('themeAuto'),
+                title: t('themeAuto'),
+                style: { '--sw-bg': READER_THEMES[0].bg, '--sw-ink': READER_THEMES[0].ink },
+                onClick: function pick() { applySettings({ theme: 'auto' }); },
+              },
+                h('span', null, t('themeAuto')),
+                settings.theme === 'auto' ? h('span', { className: 'sr-theme-check', 'aria-hidden': 'true' }, h(Icon, { name: 'check', size: 10 })) : null,
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('highlightColor')),
-              h('div', { className: 'sr-setting-color-row' },
-                HIGHLIGHT_COLORS.map(function colorDot(color) {
-                  return h('button', {
-                    key: color.id,
-                    type: 'button',
-                    className: 'sr-setting-color',
-                    style: { background: color.value },
-                    'aria-pressed': (settings.highlightColor || 'amber') === color.id,
-                    'aria-label': t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
-                    title: t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
-                    onClick: function pick() { applySettings({ highlightColor: color.id }); },
-                  });
-                }),
-              ),
+          ),
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('highlightColor')),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('fontSize'), h('span', null, settings.fontSize + 'px')),
-              h('div', { className: 'sr-font-row' },
-                h('div', { className: 'sr-font-sample' }, t('fontPreview'), h('small', null, t('readerHint'))),
-                h('div', { className: 'sr-stepper' },
-                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('decreaseFont'), onClick: function smaller() { changeFontSize(-1); } }, h(Icon, { name: 'minus', size: 13 })),
-                  h('span', { className: 'sr-step-value' }, String(settings.fontSize)),
-                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('increaseFont'), onClick: function larger() { changeFontSize(1); } }, h(Icon, { name: 'plus', size: 13 })),
-                ),
-              ),
+            h('div', { className: 'sr-settings-color-row' },
+              HIGHLIGHT_COLORS.map(function colorDot(color) {
+                return h('button', {
+                  key: color.id,
+                  type: 'button',
+                  className: 'sr-setting-color',
+                  style: { background: color.value },
+                  'aria-pressed': (settings.highlightColor || 'amber') === color.id,
+                  'aria-label': t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
+                  title: t('color' + color.id.charAt(0).toUpperCase() + color.id.slice(1)),
+                  onClick: function pick() { applySettings({ highlightColor: color.id }); },
+                });
+              }),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('lineHeight')),
-              h('div', { className: 'sr-font-row' },
-                h('div', { className: 'sr-font-sample', style: { fontSize: '12px', opacity: .7 } }, settings.lineHeight.toFixed(2)),
-                h('div', { className: 'sr-segment' },
-                  [{ value: 1.7, key: 'lineCompact' }, { value: 1.95, key: 'lineNormal' }, { value: 2.2, key: 'lineLoose' }].map(function option(item) {
-                    return h('button', {
-                      key: item.key,
-                      type: 'button',
-                      'aria-pressed': Math.abs(settings.lineHeight - item.value) < 0.01,
-                      onClick: function pick() { applySettings({ lineHeight: item.value }); },
-                    }, t(item.key));
-                  }),
-                ),
-              ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('fontFamily')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+          ),
+        );
+        const typographyPanel = h('div', { className: 'sr-tab-page sr-type-page' },
+          h('div', { className: 'sr-type-grid' },
+            typeField({
+              id: 'font-family', full: true, label: t('fontFamily'),
+              control: h('div', { className: 'sr-segment sr-segment--wide' },
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'serif', onClick: function serif() { applySettings({ fontFamily: 'serif' }); }, style: { flex: 1 } }, t('fontSerif')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'sans', onClick: function sans() { applySettings({ fontFamily: 'sans' }); }, style: { flex: 1 } }, t('fontSans')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'kai', onClick: function kai() { applySettings({ fontFamily: 'kai' }); }, style: { flex: 1 } }, t('fontKai')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'dyslexic', onClick: function dyslexic() { applySettings({ fontFamily: 'dyslexic' }); }, style: { flex: 1 } }, t('fontDyslexic')),
                 h('button', { type: 'button', 'aria-pressed': settings.fontFamily === 'system', onClick: function system() { applySettings({ fontFamily: 'system' }); }, style: { flex: 1 } }, t('fontSystem')),
               ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('letterSpacing'), h('span', null, settings.letterSpacing.toFixed(2) + 'em')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'font-size', label: t('fontSize'), value: settings.fontSize + 'px',
+              control: h('div', { className: 'sr-type-size' },
+                h('span', { className: 'sr-type-glyph' }, t('fontPreview')),
+                h('div', { className: 'sr-stepper' },
+                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('decreaseFont'), onClick: function smaller() { changeFontSize(-1); } }, h(Icon, { name: 'minus', size: 13 })),
+                  h('span', { className: 'sr-step-value' }, String(settings.fontSize)),
+                  h('button', { type: 'button', className: 'sr-step-btn', 'aria-label': t('increaseFont'), onClick: function larger() { changeFontSize(1); } }, h(Icon, { name: 'plus', size: 13 })),
+                ),
+              ),
+            }),
+            typeField({
+              id: 'line-height', label: t('lineHeight'), value: settings.lineHeight.toFixed(2),
+              control: h('div', { className: 'sr-segment' },
+                [{ value: 1.7, key: 'lineCompact' }, { value: 1.95, key: 'lineNormal' }, { value: 2.2, key: 'lineLoose' }].map(function option(item) {
+                  return h('button', {
+                    key: item.key,
+                    type: 'button',
+                    'aria-pressed': Math.abs(settings.lineHeight - item.value) < 0.01,
+                    onClick: function pick() { applySettings({ lineHeight: item.value }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
+              ),
+            }),
+            h('details', { className: 'sr-type-more' },
+              h('summary', null, t('moreTypography')),
+              h('div', { className: 'sr-type-more-body' },
+            typeField({
+              id: 'letter-spacing', label: t('letterSpacing'), value: settings.letterSpacing.toFixed(2) + 'em',
+              control: h('div', { className: 'sr-segment' },
                 [{ value: 0.01, key: 'lineCompact' }, { value: 0.03, key: 'lineNormal' }, { value: 0.06, key: 'lineLoose' }].map(function option(item) {
                   return h('button', {
                     key: item.key,
@@ -2480,10 +3177,10 @@
                   }, t(item.key));
                 }),
               ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('paragraphSpacing'), h('span', null, settings.paragraphSpacing.toFixed(2) + 'em')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
+            }),
+            typeField({
+              id: 'paragraph-spacing', label: t('paragraphSpacing'), value: settings.paragraphSpacing.toFixed(2) + 'em',
+              control: h('div', { className: 'sr-segment' },
                 [{ value: 0.65, key: 'lineCompact' }, { value: 0.9, key: 'lineNormal' }, { value: 1.25, key: 'lineLoose' }].map(function option(item) {
                   return h('button', {
                     key: item.key,
@@ -2494,131 +3191,354 @@
                   }, t(item.key));
                 }),
               ),
+            }),
+              ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('pageWidth')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
-                [{ value: 'compact', key: 'lineCompact' }, { value: 'comfortable', key: 'lineNormal' }, { value: 'wide', key: 'lineLoose' }].map(function option(item) {
+            bookHasImages ?             typeField({
+              id: 'image-layout', full: true, label: t('imageLayout'),
+              control: h('div', { className: 'sr-segment sr-segment--wide' },
+                [{ value: 'inline', key: 'imageLayoutInline' }, { value: 'wide', key: 'imageLayoutWide' }, { value: 'margin', key: 'imageLayoutMargin' }].map(function option(item) {
                   return h('button', {
                     key: item.value,
                     type: 'button',
-                    'aria-pressed': settings.pageWidth === item.value,
-                    onClick: function pick() { applySettings({ pageWidth: item.value }); },
+                    'aria-pressed': bookImageLayout === item.value,
+                    onClick: function pick() {
+                      applySettings({
+                        imageLayout: item.value,
+                        imageLayouts: Object.assign({}, settings.imageLayouts || {}, { [book.id]: item.value }),
+                      });
+                    },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
+              ),
+            }) : null,
+            (settings.layout || 'page') === 'scroll' ?             typeField({
+              id: 'writing-mode', full: true, label: t('writingMode'),
+              control: h('div', { className: 'sr-segment sr-segment--wide' },
+                h('button', { type: 'button', 'aria-pressed': (settings.writingMode || 'horizontal') !== 'vertical', onClick: function horizontal() { applySettings({ writingMode: 'horizontal' }); }, style: { flex: 1 } }, t('writingHorizontal')),
+                h('button', { type: 'button', 'aria-pressed': settings.writingMode === 'vertical', onClick: function vertical() { applySettings({ writingMode: 'vertical', layout: 'scroll' }); }, style: { flex: 1 } }, t('writingVertical')),
+              ),
+            }) : null,
+          ),
+          (settings.layout || 'page') === 'scroll' ? h('p', { className: 'sr-settings-hint' }, t('writingModeHint')) : null,
+        );
+        const compactViewport = typeof window !== 'undefined' && window.innerWidth < 760;
+        const wideViewport = typeof window !== 'undefined' && window.innerWidth >= 1180;
+        const layoutOptions = compactViewport
+          ? [{ value: 'page', key: 'layoutPage' }, { value: 'scroll', key: 'layoutScroll' }]
+          : [{ value: 'page', key: 'layoutPage' }, { value: 'spread', key: 'layoutSpread' }, { value: 'scroll', key: 'layoutScroll' }];
+        const layoutPanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('readingPreset')),
+              settings.preset === 'custom' ? h('em', null, t('presetCustom')) : null,
+            ),
+            h('div', { className: 'sr-preset-grid' },
+              ['classic', 'magazine', 'minimal'].map(function preset(name) {
+                const config = presetSettings[name];
+                return h('button', {
+                  key: name,
+                  type: 'button',
+                  className: 'sr-preset-card',
+                  'aria-pressed': settings.preset === name,
+                  'data-theme': config.theme,
+                  'data-layout': config.layout,
+                  onClick: function pick() { applyPreset(name); },
+                },
+                  h('span', { className: 'sr-preset-art' }, h('i'), h('i'), h('i'), h('i')),
+                  h('span', { className: 'sr-preset-name' }, t('preset' + name.charAt(0).toUpperCase() + name.slice(1))),
+                );
+              }),
+              settings.preset === 'custom' ? h('button', {
+                type: 'button',
+                className: 'sr-preset-card is-custom',
+                'aria-pressed': 'true',
+                'data-theme': settings.theme,
+                'data-layout': settings.layout,
+              },
+                h('span', { className: 'sr-preset-art' }, h('i'), h('i'), h('i'), h('i')),
+                h('span', { className: 'sr-preset-name' }, t('presetCustom')),
+              ) : null,
+            ),
+          ),
+          h('div', { className: 'sr-settings-section' },
+            h('div', { className: 'sr-settings-section-head' },
+              h('span', null, t('readingLayout')),
+            ),
+            h('div', { className: 'sr-segment sr-segment--wide' },
+              layoutOptions.map(function option(item) {
+                return h('button', {
+                  key: item.value,
+                  type: 'button',
+                  'aria-pressed': (settings.layout || 'page') === item.value,
+                  onClick: function pick() {
+                    const patch = { layout: item.value };
+                    if (item.value !== 'scroll' && settings.writingMode === 'vertical') patch.writingMode = 'horizontal';
+                    applySettings(patch);
+                  },
+                  style: { flex: 1 },
+                }, t(item.key));
+              }),
+            ),
+            h('p', { className: 'sr-settings-hint' }, t('layoutModeHint')),
+            (settings.layout || 'page') === 'spread' ? h('div', { className: 'sr-spread-options' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('spreadGutter'))),
+              h('div', { className: 'sr-segment' },
+                [{ value: 'comfortable', key: 'spreadGutterComfortable' }, { value: 'compact', key: 'spreadGutterCompact' }].map(function option(item) {
+                  return h('button', {
+                    key: item.value,
+                    type: 'button',
+                    'aria-pressed': (settings.spreadGutter || 'comfortable') === item.value,
+                    onClick: function pick() { applySettings({ spreadGutter: item.value }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
+              ),
+              h('div', { className: 'sr-setting-toggle-row', style: { marginTop: '8px' } },
+                h('span', { className: 'sr-setting-label', style: { marginBottom: 0 } }, t('spreadRule')),
+                h('button', {
+                  type: 'button',
+                  role: 'switch',
+                  className: 'sr-switch',
+                  'aria-checked': settings.spreadRule !== false,
+                  'aria-label': t('spreadRule'),
+                  onClick: function toggleRule() { applySettings({ spreadRule: settings.spreadRule === false }); },
+                }, h('span', { className: 'sr-switch-thumb' })),
+              ),
+            ) : null,
+          ),
+          h('div', { className: 'sr-settings-list' },
+            readingRow({
+              id: 'immersive', label: t('immersive'), hint: t('immersiveHint'),
+              checked: settings.immersive === true,
+              onToggle: function toggleImmersive() { applySettings({ immersive: !settings.immersive }); },
+            }),
+          ),
+          (!compactViewport && chapters.length > 1 && (settings.layout || 'page') !== 'scroll') ? h('div', { className: 'sr-margin-aux-field', 'data-setting': 'margin-aux' },
+            h('div', { className: 'sr-type-label' }, h('span', null, t('marginAux')), h('small', null, t('marginAuxHint'))),
+            h('div', { className: 'sr-segment sr-segment--wide' },
+              [{ value: 'none', key: 'marginAuxNone' }, { value: 'notes', key: 'marginAuxNotes' }, { value: 'rail', key: 'marginAuxRail' }, { value: 'footnotes', key: 'marginAuxFootnotes' }].map(function option(item) {
+                const current = settings.marginNotes ? 'notes' : settings.chapterRail ? 'rail' : settings.marginFootnotes ? 'footnotes' : 'none';
+                return h('button', {
+                  key: item.value,
+                  type: 'button',
+                  'aria-pressed': current === item.value,
+                  onClick: function pick() { applySettings({ marginNotes: item.value === 'notes', chapterRail: item.value === 'rail', marginFootnotes: item.value === 'footnotes' }); },
+                }, t(item.key));
+              }),
+              settings.marginNotes && !marginNotesVisible ? h('p', { className: 'sr-settings-hint' }, t('marginNotesWidthHint')) : null,
+            ),
+          ) : null,
+        );
+        const readingPanel = h('div', { className: 'sr-tab-page' },
+          h('div', { className: 'sr-settings-list' },
+            h('div', { className: 'sr-type-field', 'data-setting': 'reading-guide' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('readingGuide')), h('small', null, t('readingGuideHint'))),
+              h('div', { className: 'sr-segment sr-segment--wide' },
+                [{ value: 'none', key: 'guideNone' }, { value: 'ruler', key: 'guideRuler' }, { value: 'focus', key: 'guideFocus' }].map(function option(item) {
+                  return h('button', {
+                    key: item.value,
+                    type: 'button',
+                    'aria-pressed': (settings.readingGuide || 'none') === item.value,
+                    onClick: function pick() { applySettings({ readingGuide: item.value }); },
                     style: { flex: 1 },
                   }, t(item.key));
                 }),
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('textAlign')),
-              h('div', { className: 'sr-segment', style: { width: '100%' } },
-                h('button', {
-                  type: 'button',
-                  'aria-pressed': (settings.textAlign || 'justify') === 'justify',
-                  onClick: function justify() { applySettings({ textAlign: 'justify' }); },
-                  style: { flex: 1 },
-                }, t('alignJustify')),
-                h('button', {
-                  type: 'button',
-                  'aria-pressed': settings.textAlign === 'left',
-                  onClick: function left() { applySettings({ textAlign: 'left' }); },
-                  style: { flex: 1 },
-                }, t('alignLeft')),
+            h('div', { className: 'sr-type-field', 'data-setting': 'dock-mode' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('dockMode'))),
+              h('div', { className: 'sr-segment sr-segment--wide' },
+                (compactViewport ? [{ value: 'auto', key: 'dockAuto' }, { value: 'standard', key: 'dockStandard' }, { value: 'thumb', key: 'dockThumb' }] : [{ value: 'auto', key: 'dockAuto' }, { value: 'standard', key: 'dockStandard' }, { value: 'minimal', key: 'dockMinimal' }]).map(function option(item) {
+                  return h('button', {
+                    key: item.value,
+                    type: 'button',
+                    'aria-pressed': (settings.dockMode || 'auto') === item.value,
+                    onClick: function pick() { applySettings({ dockMode: item.value }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('autoHideChrome')),
-                  h('p', { className: 'sr-setting-hint' }, t('autoHideChromeHint')),
-                ),
-                h('button', {
-                  type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': settings.autoHideChrome,
-                  'aria-label': t('autoHideChrome'),
-                  onClick: function toggle() { applySettings({ autoHideChrome: !settings.autoHideChrome }); },
-                }, h('span', { className: 'sr-switch-thumb' })),
+            h('div', { className: 'sr-type-field', 'data-setting': 'page-width' },
+              h('div', { className: 'sr-type-label' }, h('span', null, t('pageWidth')), h('em', null, widthDraft !== null ? widthDraft + 'px' : pageWidthLabel)),
+              h('div', { className: 'sr-segment sr-segment--wide' },
+                [{ value: 'compact', key: 'widthCompact', px: 680 }, { value: 'comfortable', key: 'widthComfortable', px: 860 }, { value: 'wide', key: 'widthWide', px: 1120 }, { value: 'full', key: 'widthFull', px: 1416 }].map(function option(item) {
+                  return h('button', {
+                    key: item.value,
+                    type: 'button',
+                    'aria-pressed': (settings.pageWidth || 'comfortable') === item.value,
+                    onClick: function pick() { widthDragRef.current = false; setWidthDraft(null); applySettings({ pageWidth: item.value, pageWidthPx: item.px }); },
+                    style: { flex: 1 },
+                  }, t(item.key));
+                }),
               ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('paperSound')),
-                  h('p', { className: 'sr-setting-hint' }, t('paperSoundHint')),
-                ),
-                h('button', {
-                  type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': settings.paperSound === true,
-                  'aria-label': t('paperSound'),
-                  onClick: function toggleSound() { applySettings({ paperSound: !settings.paperSound }); },
-                }, h('span', { className: 'sr-switch-thumb' })),
-              ),
-            ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-toggle-row' },
-                h('div', null,
-                  h('div', { className: 'sr-setting-label', style: { marginBottom: '3px' } }, t('readingRuler')),
-                  h('p', { className: 'sr-setting-hint' }, t('readingRulerHint')),
-                ),
-                h('button', {
-                  type: 'button',
-                  role: 'switch',
-                  className: 'sr-switch',
-                  'aria-checked': Boolean(settings.readingRuler || rulerOpen),
-                  'aria-label': t('readingRuler'),
-                  onClick: function toggleRuler() {
-                    const next = !(settings.readingRuler || rulerOpen);
-                    setRulerOpen(next);
-                    applySettings({ readingRuler: next });
-                    props.showToast(next ? t('rulerOn') : t('rulerOff'));
+              h('div', { className: 'sr-width-slider' },
+                h('input', {
+                  type: 'range',
+                  min: 560,
+                  max: 1600,
+                  step: 20,
+                  value: widthDraft !== null ? widthDraft : (settings.pageWidthPx || 860),
+                  'aria-label': t('customPageWidth'),
+                  onPointerDown: function start() { widthDragRef.current = true; },
+                  onChange: function change(event) {
+                    const value = Number(event.target.value);
+                    if (widthDragRef.current) { setWidthDraft(value); return; }
+                    applySettings({ pageWidth: 'custom', pageWidthPx: value });
                   },
-                }, h('span', { className: 'sr-switch-thumb' })),
+                  onPointerUp: function end(event) {
+                    if (!widthDragRef.current) return;
+                    widthDragRef.current = false;
+                    const value = Number(event.currentTarget.value);
+                    setWidthDraft(null);
+                    applySettings({ pageWidth: 'custom', pageWidthPx: value });
+                  },
+                  onPointerCancel: function cancel() { widthDragRef.current = false; setWidthDraft(null); },
+                  onBlur: function blur() { widthDragRef.current = false; setWidthDraft(null); },
+                }),
+                h('span', null, widthDraft !== null ? widthDraft + 'px' : (settings.pageWidthPx || 860) + 'px'),
               ),
             ),
-            h('div', { className: 'sr-setting-group' },
-              h('div', { className: 'sr-setting-label' }, t('speechVoice')),
-              voices.length
-                ? h('select', {
-                  className: 'sr-setting-select',
-                  value: settings.speechVoice || '',
-                  'aria-label': t('speechVoice'),
-                  onChange: function change(event) { applySettings({ speechVoice: event.target.value }); },
-                },
-                  h('option', { value: '' }, t('systemVoiceDefault')),
-                  voices.map(function voice(item) {
-                    return h('option', { key: item.voiceURI || item.name, value: item.voiceURI || item.name },
-                      item.name + ' · ' + item.lang,
-                    );
-                  }),
-                )
-                : h('p', { className: 'sr-setting-hint' }, t('noVoices')),
+          ),
+        );
+        const panel = settingsTab === 'typography'
+          ? typographyPanel
+          : settingsTab === 'layout'
+            ? layoutPanel
+            : settingsTab === 'reading'
+              ? readingPanel
+              : appearancePanel;
+        return h(React.Fragment, null,
+          h('div', { className: 'sr-sheet-scrim', onClick: function close() { setSettingsOpen(false); } }),
+          h('div', { className: 'sr-sheet sr-settings-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('readerSettings'), onKeyDown: trapSettingsFocus },
+            h('div', { className: 'sr-settings-head' },
+              h('div', { className: 'sr-settings-heading' },
+                h('span', { className: 'sr-settings-kicker' }, t('settingsKicker')),
+                h('strong', null, t('readerSettings')),
+              ),
+              h('div', { className: 'sr-settings-head-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'sr-reader-icon',
+                  title: t('searchSettings'),
+                  'aria-label': t('searchSettings'),
+                  'aria-expanded': settingsSearchOpen ? 'true' : 'false',
+                  onClick: function toggleSearch() { setSettingsSearchOpen(!settingsSearchOpen); setSettingsQuery(''); },
+                }, h(Icon, { name: 'search', size: 15 })),
+                h('div', { className: 'sr-settings-scope-switch', role: 'group', 'aria-label': t('settingsScope') },
+                  h('button', {
+                    type: 'button',
+                    'aria-pressed': settingsScope === 'global',
+                    onClick: function globalScope() { setSettingsScope('global'); },
+                  }, t('settingsGlobal')),
+                  h('button', {
+                    type: 'button',
+                    'aria-pressed': settingsScope === 'book',
+                    onClick: function bookScope() { setSettingsScope('book'); },
+                  }, t('settingsBook')),
+                ),
+                h('button', { type: 'button', className: 'sr-reader-icon', onClick: function close() { setSettingsOpen(false); }, title: t('close'), 'aria-label': t('close') },
+                  h(Icon, { name: 'close', size: 16 }),
+                ),
+              ),
             ),
+            h('div', { className: 'sr-settings-tabs', role: 'tablist', 'aria-label': t('readerSettings') },
+              settingsTabs.map(function tab(item, index) {
+                return h('button', {
+                  key: item.id,
+                  type: 'button',
+                  role: 'tab',
+                  id: 'sr-settings-tab-' + item.id,
+                  className: 'sr-settings-tab',
+                  'aria-selected': settingsTab === item.id ? 'true' : 'false',
+                  'aria-controls': 'sr-settings-panel',
+                  tabIndex: settingsTab === item.id ? 0 : -1,
+                  onClick: function select() { setSettingsTab(item.id); },
+                  onKeyDown: function keys(event) {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+                    event.preventDefault();
+                    const nextIndex = event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? settingsTabs.length - 1
+                        : (index + (event.key === 'ArrowRight' ? 1 : -1) + settingsTabs.length) % settingsTabs.length;
+                    setSettingsTab(settingsTabs[nextIndex].id);
+                    const parent = event.currentTarget.parentElement;
+                    if (parent && parent.children[nextIndex]) parent.children[nextIndex].focus();
+                  },
+                }, h('span', null, item.label), dirtySettings[item.id] ? h('i', { className: 'sr-settings-dot', 'aria-hidden': 'true' }) : null);
+              }),
+            ),
+            (settingsScope === 'book' && settingsOpen) ? h('div', { className: 'sr-book-scope-note' },
+              h('span', null, Object.keys(bookOverrides).length ? fill(t('bookOverridesActive'), { n: Object.keys(bookOverrides).length }) : t('bookOverridesNone')),
+              Object.keys(bookOverrides).length ? h('button', { type: 'button', onClick: clearBookOverrides }, t(clearBookConfirm ? 'clearBookOverridesConfirm' : 'clearBookOverrides')) : null,
+            ) : null,
+            settingsSearchOpen ? h(React.Fragment, null,
+              h('div', { className: 'sr-settings-search' },
+                h(Icon, { name: 'search', size: 13 }),
+                h('input', {
+                  type: 'text',
+                  autoFocus: true,
+                  value: settingsQuery,
+                  placeholder: t('searchSettings'),
+                  'aria-label': t('searchSettings'),
+                  onChange: function change(event) { setSettingsQuery(event.target.value); },
+                  onKeyDown: function keys(event) {
+                    if (event.key === 'Escape') { event.preventDefault(); setSettingsSearchOpen(false); setSettingsQuery(''); }
+                    if (event.key === 'Enter' && searchResults[0]) { event.preventDefault(); goToSetting(searchResults[0]); }
+                  },
+                }),
+                h('button', { type: 'button', className: 'sr-settings-search-close', onClick: function close() { setSettingsSearchOpen(false); setSettingsQuery(''); }, 'aria-label': t('close') }, h(Icon, { name: 'close', size: 11 })),
+              ),
+              settingsQuery.trim() ? h('div', { className: 'sr-settings-search-results' },
+                searchResults.length
+                  ? searchResults.map(function result(item, index) {
+                      return h('button', { key: item.tab + '-' + index, type: 'button', onClick: function pick() { goToSetting(item); } },
+                        h('span', null, item.label),
+                        h('small', null, t('settingsTab' + item.tab.charAt(0).toUpperCase() + item.tab.slice(1))),
+                      );
+                    })
+                  : h('p', null, t('settingsSearchEmpty')),
+              ) : null,
+            ) : null,
+            (settingsTab === 'appearance' || settingsTab === 'typography') ? h('div', { className: 'sr-settings-preview' },
+              h('span', { className: 'sr-settings-preview-kicker' }, 'READING SAMPLE'),
+              h('p', {
+                className: 'sr-settings-preview-text',
+                style: { fontSize: Math.max(13, Math.min(20, settings.fontSize * 0.82)) + 'px', lineHeight: String(settings.lineHeight), fontFamily: settings.fontFamily === 'sans' || settings.fontFamily === 'system' || settings.fontFamily === 'dyslexic' ? 'system-ui, -apple-system, sans-serif' : settings.fontFamily === 'kai' ? '"Kaiti SC", "STKaiti", serif' : 'Georgia, "Songti SC", "Noto Serif SC", serif' },
+              }, t('settingsPreviewText')),
+              h('small', null, settings.fontSize + 'px · ' + settings.lineHeight.toFixed(2) + ' · ' + settings.fontFamily),
+            ) : null,
+            h('div', {
+              ref: settingsPanelRef,
+              className: 'sr-settings-panel',
+              id: 'sr-settings-panel',
+              role: 'tabpanel',
+              'aria-labelledby': 'sr-settings-tab-' + settingsTab,
+            }, panel),
             h('div', { className: 'sr-sheet-foot' },
-              h('button', {
-                type: 'button',
-                className: 'sr-text-btn',
-                onClick: function resetSettings() {
-                  applySettings({
-                    theme: 'paper',
-                    fontSize: 19,
-                    lineHeight: 1.95,
-                    fontFamily: 'serif',
-                    letterSpacing: 0.02,
-                    paragraphSpacing: 0.9,
-                    pageWidth: 'comfortable',
-                    textAlign: 'justify',
-                    autoHideChrome: false,
-                    paperSound: false,
-                    readingRuler: false,
-                  });
-                  props.showToast(t('settingsReset'));
-                },
-              }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetSettings'))),
-              h('p', { className: 'sr-sheet-note' }, t('savedLocally')),
+              h('div', { className: 'sr-settings-foot-actions' },
+                dirtyCount ? h('span', { className: 'sr-settings-dirty-count' }, fill(t('settingsChanged'), { n: dirtyCount })) : null,
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  title: t('resetThisPageHint'),
+                  onClick: resetCurrentTab,
+                }, h(Icon, { name: 'refresh', size: 11 }), h('span', null, t('resetThisPage'))),
+                h('button', {
+                  type: 'button',
+                  className: 'sr-text-btn',
+                  title: t('resetAllSettingsHint'),
+                  onClick: resetAllSettings,
+                }, h('span', null, t('resetAllSettings'))),
+              ),
+              h('p', { className: 'sr-sheet-note' + (savedPulse || undoAvailable || redoAvailable ? ' is-visible' : '') },
+                savedPulse ? t('settingsSaved') : null,
+                undoAvailable ? h('button', { type: 'button', className: 'sr-note-undo', onClick: undoLastSettings }, t('undo')) : null,
+                redoAvailable ? h('button', { type: 'button', className: 'sr-note-undo', onClick: redoLastSettings }, t('redo')) : null,
+              ),
             ),
           ),
         );
@@ -2843,6 +3763,72 @@
         );
       }
 
+      function chapterOpenNode() {
+        return h('header', { className: 'sr-chapter-head' },
+          h('div', { className: 'sr-chapter-meta' },
+            h('span', { className: 'sr-chapter-kicker' }, fill(t('chapterIndex'), { n: chapterIndex + 1 })),
+            book.author ? h('span', { className: 'sr-chapter-author' }, book.author) : null,
+          ),
+          h('h1', { className: 'sr-chapter-title' }, chapter.title),
+        );
+      }
+
+      function chapterEndNode() {
+        if (chapterIndex >= chapters.length - 1) {
+          return h('div', { className: 'sr-chapter-end sr-chapter-end--book', ref: endRef },
+            h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
+            h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
+          );
+        }
+        return h('button', {
+          type: 'button',
+          className: 'sr-chapter-end sr-chapter-end--next',
+          ref: endRef,
+          title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+          'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
+          onClick: function nextChapter(event) {
+            event.stopPropagation();
+            goChapter(chapterIndex + 1, 'start');
+          },
+        },
+          h('span', null, '· ' + t('chapterEnd') + ' ·'),
+          h('span', { className: 'sr-chapter-end-next' },
+            h('span', null, t('nextChapter')),
+            h('strong', null, chapters[chapterIndex + 1].title),
+            h(Icon, { name: 'chevron-right', size: 11 }),
+          ),
+        );
+      }
+
+      function applyRangeValue(value) {
+        if (scrollMode) {
+          const ratio = clamp(Number(value) / 1000, 0, 1);
+          const element = columnsRef.current;
+          if (element) {
+            const vertical = settings.writingMode === 'vertical';
+            const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+            if (vertical) element.scrollLeft = -ratio * max;
+            else element.scrollTop = ratio * max;
+          }
+          setScrollRatio(ratio);
+          currentPercentRef.current = ratio;
+          return;
+        }
+        setPage(Number(value));
+        dismissPopovers();
+      }
+
+      function handleScroll(event) {
+        if (!scrollMode) return;
+        const element = event.currentTarget;
+        const vertical = settings.writingMode === 'vertical';
+        const max = Math.max(0, vertical ? element.scrollWidth - element.clientWidth : element.scrollHeight - element.clientHeight);
+        const position = vertical ? Math.abs(element.scrollLeft) : element.scrollTop;
+        const ratio = max > 0 ? clamp(position / max, 0, 1) : 0;
+        setScrollRatio(ratio);
+        currentPercentRef.current = ratio;
+      }
+
       if (!chapters.length) {
         return h('div', {
           className: 'sr-reader',
@@ -2866,9 +3852,22 @@
         className: 'sr-reader',
         'data-theme': activeThemeId,
         'data-page-width': settings.pageWidth,
+        'data-has-images': chapterHasImages ? 'true' : 'false',
+        'data-layout': settings.layout || 'page',
+        'data-spread-gutter': settings.spreadGutter === 'compact' ? 'compact' : 'comfortable',
+        'data-spread-rule': settings.spreadRule === false ? 'false' : 'true',
+        'data-image-layout': bookImageLayout,
+        'data-writing-mode': settings.writingMode === 'vertical' ? 'vertical' : 'horizontal',
+        'data-margin-notes': marginNotesVisible ? 'true' : 'false',
+        'data-chapter-rail': settings.chapterRail === true ? 'true' : 'false',
+        'data-thumb-dock': (settings.dockMode === 'thumb' || settings.dockMode === 'auto' && typeof window !== 'undefined' && window.innerWidth < 760) ? 'true' : 'false',
+        'data-rail-open': dockedRail ? 'true' : 'false',
+        'data-minimal-dock': (settings.dockMode !== 'standard' && settings.dockMode !== 'thumb') || (settings.dockMode === 'auto' && typeof window !== 'undefined' && window.innerWidth >= 760) ? 'true' : 'false',
         'data-tts': tts.status === 'idle' ? 'false' : 'true',
         ref: readerRef,
         tabIndex: -1,
+        onTouchStart: handleRootTouchStart,
+        onTouchEnd: handleRootTouchEnd,
       },
         h('div', {
           className: 'sr-sr-only',
@@ -2877,6 +3876,73 @@
           'aria-atomic': 'true',
         }, fill(t('readingLivePage'), { chapter: chapter.title, page: page + 1, total: pageCount })),
         h('div', { className: 'sr-reader-slim-progress', style: { width: overallBookPct + '%' }, 'aria-hidden': 'true', title: overallBookPct + '%' }),
+        settings.readingGuide === 'focus' ? h(React.Fragment, null,
+          h('div', {
+            className: 'sr-focus-mask sr-focus-mask--top',
+            style: { height: Math.max(0, rulerY - 130) + 'px' },
+            'aria-hidden': 'true',
+          }),
+          h('div', {
+            className: 'sr-focus-mask sr-focus-mask--bottom',
+            style: { top: Math.min(box.h, rulerY + 130) + 'px', bottom: '0px' },
+            'aria-hidden': 'true',
+          }),
+        ) : null,
+        (!chrome && settings.immersive) ? h('div', { className: 'sr-edge-meta', 'aria-hidden': 'true' },
+          h('span', { className: 'sr-edge-book' }, book.title),
+          h('span', { className: 'sr-edge-chapter' }, chapter.title + ' · ' + pageLabel),
+        ) : null,
+        marginNotesVisible ? h('aside', { className: 'sr-margin-notes', 'aria-label': t('marginNotes') },
+          h('div', { className: 'sr-margin-notes-head' },
+            h('span', null, t('marginNotes')),
+            h('small', null, String(chapterHighlights.length + chapterBookmarks.length)),
+          ),
+          chapterHighlights.length
+            ? chapterHighlights.slice(0, 6).map(function marginNote(note) {
+                return h('button', {
+                  key: note.id,
+                  type: 'button',
+                  className: 'sr-margin-note',
+                  onClick: function jump() { jumpToHighlight(note); },
+                },
+                  h('span', { className: 'sr-margin-note-mark' }),
+                  h('p', null, note.text),
+                  note.note ? h('small', null, note.note) : null,
+                );
+              })
+            : h('p', { className: 'sr-margin-empty' }, t('noHighlights')),
+          (chapterHighlights.length + chapterBookmarks.length) > 6 ? h('button', {
+            type: 'button',
+            className: 'sr-margin-more',
+            onClick: function openAll() { setDrawer('notes'); },
+          }, h('span', null, t('viewAll')), h(Icon, { name: 'chevron-right', size: 10 })) : null,
+          chapterBookmarks.length ? h('div', { className: 'sr-margin-bookmarks' },
+            chapterBookmarks.map(function marginBookmark(item) {
+              return h('button', {
+                key: item.id,
+                type: 'button',
+                className: 'sr-margin-bookmark',
+                onClick: function jump() { goChapter(item.chapterIndex, 'percent', item.percent); },
+              }, h(Icon, { name: 'bookmark', size: 10 }), h('span', null, item.chapterTitle || chapter.title));
+            }),
+          ) : null,
+        ) : null,
+        (settings.chapterRail === true && chapters.length > 1) ? h('nav', { className: 'sr-chapter-rail', 'aria-label': t('readerToc') },
+          chapters.map(function railChapter(item, index) {
+            return h('button', {
+              key: item.id || index,
+              type: 'button',
+              className: 'sr-chapter-rail-node',
+              'data-active': index === chapterIndex ? 'true' : 'false',
+              title: item.title,
+              'aria-label': item.title,
+              onClick: function jump() { goChapter(index, 'resume'); },
+            },
+              h('span', { className: 'sr-chapter-rail-dot' }),
+              h('span', { className: 'sr-chapter-rail-label' }, String(index + 1)),
+            );
+          }),
+        ) : null,
         h('header', { className: 'sr-reader-top' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-top-left' },
             h('button', { type: 'button', className: 'sr-reader-back', onClick: props.onExit, title: t('readerBack') },
@@ -2888,15 +3954,7 @@
               className: 'sr-jump-return',
               title: fill(t('returnPreviousRead'), { n: jumpReturn.page + 1 }),
               'aria-label': fill(t('returnPreviousRead'), { n: jumpReturn.page + 1 }),
-              onClick: function goBack() {
-                const prev = jumpReturn;
-                setJumpReturn(null);
-                if (prev.chapterIndex === chapterIndex) {
-                  setPage(prev.page);
-                } else {
-                  goChapter(prev.chapterIndex, 'page', prev.page);
-                }
-              },
+              onClick: function goBack() { returnFromJump(); },
             },
               h(Icon, { name: 'arrow-left', size: 12 }),
               h('span', null, t('returnPreviousReadLabel')),
@@ -2918,8 +3976,8 @@
               'aria-label': fill(t('openChapterTocHint'), { n: chapterIndex + 1 }),
               onClick: function toggleToc() { setDrawer(drawer === 'toc' ? null : 'toc'); },
             },
-              h('small', null, book.title + (chapters.length > 1 ? ' · ' + (chapterIndex + 1) + '/' + chapters.length : '') + ' · ' + Math.round(progressPercentValue * 100) + '%'),
-              h('strong', null, chapter.title),
+              h('small', null, chapters.length > 1 ? fill(t('chapterIndex'), { n: chapterIndex + 1 }) + ' / ' + chapters.length : t('reading')),
+              h('strong', null, book.title),
             ),
             h('button', {
               type: 'button',
@@ -2931,47 +3989,6 @@
             }, h(Icon, { name: 'chevron-right', size: 13 })),
           ),
           h('div', { className: 'sr-reader-top-right' },
-            h('div', { className: 'sr-font-anchor' },
-              h('button', {
-                type: 'button',
-                className: 'sr-reader-icon sr-font-trigger',
-                'data-on': fontQuickOpen ? 'true' : 'false',
-                'aria-expanded': fontQuickOpen ? 'true' : 'false',
-                'aria-haspopup': 'dialog',
-                title: t('fontQuick'),
-                'aria-label': t('fontQuick'),
-                onClick: function toggleFontQuick() {
-                  if (fontQuickOpen) { setFontQuickOpen(false); return; }
-                  dismissPopovers();
-                  setFontQuickOpen(true);
-                },
-              }, h('span', { className: 'sr-font-glyph', 'aria-hidden': 'true' }, 'Aa')),
-              fontQuickOpen ? h('div', { className: 'sr-font-quick', role: 'dialog', 'aria-label': t('fontQuick') },
-                h('div', { className: 'sr-font-quick-row' },
-                  h('button', {
-                    type: 'button',
-                    className: 'sr-font-step',
-                    title: t('decreaseFont'),
-                    'aria-label': t('decreaseFont'),
-                    disabled: settings.fontSize <= FONT_SIZE_MIN,
-                    onClick: function smaller() { changeFontSize(-1); },
-                  }, h(Icon, { name: 'minus', size: 13 })),
-                  h('span', { className: 'sr-font-quick-value' }, settings.fontSize + 'px'),
-                  h('button', {
-                    type: 'button',
-                    className: 'sr-font-step',
-                    title: t('increaseFont'),
-                    'aria-label': t('increaseFont'),
-                    disabled: settings.fontSize >= FONT_SIZE_MAX,
-                    onClick: function larger() { changeFontSize(1); },
-                  }, h(Icon, { name: 'plus', size: 13 })),
-                ),
-                h('div', { className: 'sr-font-quick-foot' },
-                  h('button', { type: 'button', className: 'sr-font-quick-link', onClick: resetFontSize }, t('fontReset')),
-                  h('button', { type: 'button', className: 'sr-font-quick-link', onClick: function more() { setFontQuickOpen(false); setSettingsOpen(true); } }, t('readerSettings')),
-                ),
-              ) : null,
-            ),
             h('button', {
               type: 'button',
               className: 'sr-reader-icon',
@@ -2994,17 +4011,35 @@
             h('button', {
               type: 'button',
               className: 'sr-reader-icon',
-              title: t('notes'),
-              'aria-label': t('notes'),
-              onClick: function openNotes() { setDrawer('notes'); setNotesTab('highlights'); },
-            }, h(Icon, { name: 'notes', size: 17 })),
-            h('button', {
-              type: 'button',
-              className: 'sr-reader-icon',
-              title: isFullscreen ? t('exitFullscreen') : t('fullscreen'),
-              'aria-label': isFullscreen ? t('exitFullscreen') : t('fullscreen'),
-              onClick: toggleFullscreen,
-            }, h(Icon, { name: isFullscreen ? 'minimize' : 'maximize', size: 16 })),
+              'data-on': tts.status === 'idle' ? 'false' : 'true',
+              title: tts.status === 'playing' ? t('pauseReading') : tts.status === 'paused' ? t('resumeReading') : t('readAloud'),
+              'aria-label': tts.status === 'playing' ? t('pauseReading') : tts.status === 'paused' ? t('resumeReading') : t('readAloud'),
+              onClick: toggleSpeech,
+            }, h(Icon, { name: tts.status === 'playing' ? 'pause' : 'volume', size: 17 })),
+            h('div', { className: 'sr-top-more-anchor' },
+              h('button', {
+                type: 'button',
+                className: 'sr-reader-icon sr-top-more-trigger',
+                ref: topMoreButtonRef,
+                title: t('more'),
+                'aria-label': t('more'),
+                'aria-haspopup': 'menu',
+                'aria-expanded': topMenuOpen ? 'true' : 'false',
+                onClick: function toggleMenu() { setTopMenuOpen(!topMenuOpen); },
+              }, h(Icon, { name: 'more', size: 17 })),
+              topMenuOpen ? h('div', { className: 'sr-top-more', role: 'menu', ref: topMenuRef, onKeyDown: function menuKeys(event) {
+                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                event.preventDefault();
+                const items = Array.from(event.currentTarget.querySelectorAll('button'));
+                const index = items.indexOf(document.activeElement);
+                const next = event.key === 'ArrowDown' ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+                if (items[next]) items[next].focus();
+              } },
+                h('button', { type: 'button', role: 'menuitem', onClick: function openNotes() { setTopMenuOpen(false); setDrawer('notes'); setNotesTab('highlights'); } }, h(Icon, { name: 'notes', size: 14 }), t('notes')),
+                h('button', { type: 'button', role: 'menuitem', onClick: function fullscreen() { setTopMenuOpen(false); toggleFullscreen(); } }, h(Icon, { name: isFullscreen ? 'minimize' : 'maximize', size: 14 }), t(isFullscreen ? 'exitFullscreen' : 'fullscreen')),
+                h('button', { type: 'button', role: 'menuitem', onClick: function help() { setTopMenuOpen(false); setHelpOpen(true); } }, h(Icon, { name: 'help', size: 14 }), t('shortcuts')),
+              ) : null,
+            ),
           ),
         ),
         h('div', { className: 'sr-page-area' },
@@ -3013,16 +4048,18 @@
             className: 'sr-page-edge sr-page-edge--prev',
             'aria-label': t('prevPage'),
             title: t('prevPage'),
-            disabled: page <= 0 && chapterIndex <= 0,
+            disabled: !scrollMode && page <= 0 && chapterIndex <= 0,
             onClick: function prev(e) { e.stopPropagation(); prevPage(); },
           }, h(Icon, { name: 'chevron-left', size: 18 })),
           h('div', {
-            className: 'sr-stage',
+            className: 'sr-stage' + (spread ? ' sr-stage--spread' : '') + (scrollMode ? ' sr-stage--scroll' : ''),
+            'data-mode': scrollMode ? 'scroll' : 'paged',
+            style: settings.pageWidth === 'custom' ? { maxWidth: settings.pageWidthPx + 'px' } : undefined,
             ref: stageRef,
             onPointerDown: handlePointerDown,
             onPointerUp: handlePointerUp,
             onMouseMove: function handleMouseMove(e) {
-              if ((rulerOpen || settings.readingRuler) && stageRef.current) {
+              if ((settings.readingGuide === 'ruler' || settings.readingGuide === 'focus') && stageRef.current) {
                 const rect = stageRef.current.getBoundingClientRect();
                 setRulerY(clamp(e.clientY - rect.top, 24, Math.max(24, rect.height - 24)));
               }
@@ -3030,7 +4067,7 @@
             onClick: handleStageClick,
             onDoubleClick: handleStageDoubleClick,
           },
-            (rulerOpen || settings.readingRuler) ? h('div', {
+            settings.readingGuide === 'ruler' ? h('div', {
               className: 'sr-reading-ruler',
               style: { top: rulerY + 'px' },
               'aria-hidden': 'true',
@@ -3048,14 +4085,15 @@
             h('div', {
               className: 'sr-page-track',
               'data-instant': animate ? 'false' : 'true',
-              style: { transform: 'translate3d(' + (-Math.min(page, pageCount - 1) * step) + 'px,0,0)' },
+              style: { transform: scrollMode ? 'none' : 'translate3d(' + (-Math.min(page, pageCount - 1) * viewStep) + 'px,0,0)' },
             },
               h('div', {
                 ref: columnsRef,
-                className: 'sr-columns',
+                className: 'sr-columns' + (scrollMode ? ' sr-columns--scroll' : ''),
+                onScroll: scrollMode ? handleScroll : undefined,
                 'data-font': settings.fontFamily,
                 style: {
-                  width: pageW || '100%',
+                  width: pageW ? (spread ? pageW * 2 + gap : pageW) : '100%',
                   height: pageH || '100%',
                   columnWidth: pageW || undefined,
                   columnGap: gap,
@@ -3063,38 +4101,14 @@
                   lineHeight: String(settings.lineHeight),
                   '--sr-letter-spacing': settings.letterSpacing + 'em',
                   '--sr-para-gap': settings.paragraphSpacing + 'em',
-                  '--sr-align': settings.textAlign === 'left' ? 'left' : 'justify',
+                  '--sr-align': 'justify',
                   visibility: pageW ? 'visible' : 'hidden',
                 },
               },
-                h('header', { className: 'sr-chapter-head' },
-                  h('span', { className: 'sr-chapter-kicker' }, fill(t('chapterIndex'), { n: chapterIndex + 1 })),
-                  h('h1', { className: 'sr-chapter-title' }, chapter.title),
-                ),
+                chapterOpenNode(),
                 paragraphNodes,
-                chapterIndex >= chapters.length - 1
-                  ? h('div', { className: 'sr-chapter-end sr-chapter-end--book', ref: endRef },
-                      h('span', { className: 'sr-book-end-badge' }, '❦ ' + t('readerFinished') + ' ❦'),
-                      h('small', { className: 'sr-book-end-sub' }, t('readerFinishedSub')),
-                    )
-                  : h('button', {
-                      type: 'button',
-                      className: 'sr-chapter-end sr-chapter-end--next',
-                      ref: endRef,
-                      title: t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
-                      'aria-label': t('nextChapter') + ': ' + chapters[chapterIndex + 1].title,
-                      onClick: function nextChapter(event) {
-                        event.stopPropagation();
-                        goChapter(chapterIndex + 1, 'start');
-                      },
-                    },
-                      h('span', null, '· ' + t('chapterEnd') + ' ·'),
-                      h('span', { className: 'sr-chapter-end-next' },
-                        h('span', null, t('nextChapter')),
-                        h('strong', null, chapters[chapterIndex + 1].title),
-                        h(Icon, { name: 'chevron-right', size: 11 }),
-                      ),
-                    ),
+                chapterString.trim() ? null : h('div', { className: 'sr-empty-chapter', role: 'status' }, t('emptyChapter')),
+                chapterEndNode(),
               ),
             ),
           ),
@@ -3103,7 +4117,7 @@
             className: 'sr-page-edge sr-page-edge--next',
             'aria-label': t('nextPage'),
             title: t('nextPage'),
-            disabled: page >= pageCount - 1 && chapterIndex >= chapters.length - 1,
+            disabled: !scrollMode && page >= pageCount - 1 && chapterIndex >= chapters.length - 1,
             onClick: function next(e) { e.stopPropagation(); nextPage(); },
           }, h(Icon, { name: 'chevron-right', size: 18 })),
         ),
@@ -3115,9 +4129,12 @@
           'aria-label': t('shortcutChrome'),
           onClick: function showChrome(e) { e.stopPropagation(); setChrome(true); },
           onKeyDown: function handleKey(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setChrome(true); } },
-        }, clockText + '  ·  ' + pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }) + '  ·  ' + remainingLabel) : null,
+        }, settings.immersive ? pageLabel : (pageLabel + '  ·  ' + fill(t('readerProgress'), { n: Math.round(progressPercentValue * 100) }))) : null,
         h('div', { className: 'sr-reader-bottom' + (chrome ? '' : ' is-hidden') },
           h('div', { className: 'sr-reader-bottom-inner' },
+            (settings.dockMode === 'thumb' || (settings.dockMode === 'auto' && typeof window !== 'undefined' && window.innerWidth < 760)) ? h('button', { type: 'button', className: 'sr-reader-tool sr-thumb-nav', onClick: function prev() { prevPage(); }, title: t('prevPage'), 'aria-label': t('prevPage') },
+              h(Icon, { name: 'chevron-left', size: 15 }),
+            ) : null,
             h('button', { type: 'button', className: 'sr-reader-tool', onClick: function toc() { setDrawer('toc'); }, title: t('readerToc') },
               h(Icon, { name: 'list', size: 14 }),
               h('span', null, t('readerToc')),
@@ -3137,16 +4154,37 @@
                 className: 'sr-reader-range-tooltip',
                 style: { left: hoverScrub.x + 'px' },
               }, t('pageOf', { n: hoverScrub.page + 1, m: pageCount })) : null,
+              scrubDraft !== null ? h('div', {
+                className: 'sr-reader-scrub-preview',
+                style: { left: (scrollMode ? scrubDraft / 10 : (pageCount <= 1 ? 0 : scrubDraft / (pageCount - 1) * 100)) + '%' },
+              }, scrollMode ? Math.round(scrubDraft / 10) + '%' : t('pageOf', { n: Math.min(Number(scrubDraft) + 1, pageCount), m: pageCount })) : null,
               h('input', {
                 type: 'range',
                 className: 'sr-reader-range',
                 min: 0,
-                max: Math.max(0, pageCount - 1),
+                max: scrollMode ? 1000 : Math.max(0, pageCount - 1),
                 step: 1,
-                value: Math.min(page, pageCount - 1),
-                disabled: pageCount <= 1,
-                'aria-label': t('pageOf', { n: page + 1, m: pageCount }),
-                onChange: function change(event) { setPage(Number(event.target.value)); dismissPopovers(); },
+                value: scrubDraft !== null ? scrubDraft : (scrollMode ? Math.round(scrollRatio * 1000) : Math.min(page, pageCount - 1)),
+                disabled: scrollMode ? false : pageCount <= 1,
+                'aria-label': scrollMode ? pageLabel : t('pageOf', { n: page + 1, m: pageCount }),
+                onPointerDown: function started() { rangeScrubRef.current = true; },
+                onChange: function change(event) {
+                  const value = Number(event.target.value);
+                  if (rangeScrubRef.current) {
+                    setScrubDraft(value);
+                    return;
+                  }
+                  applyRangeValue(value);
+                },
+                onPointerUp: function ended(event) {
+                  if (!rangeScrubRef.current) return;
+                  rangeScrubRef.current = false;
+                  const value = Number(event.currentTarget.value);
+                  setScrubDraft(null);
+                  applyRangeValue(value);
+                },
+                onPointerCancel: function cancelled() { rangeScrubRef.current = false; setScrubDraft(null); },
+                onBlur: function blurred() { rangeScrubRef.current = false; setScrubDraft(null); },
               }),
               h('div', { className: 'sr-page-jump-anchor' },
                 h('button', {
@@ -3156,9 +4194,10 @@
                   'aria-haspopup': 'dialog',
                   'aria-expanded': pageJumpOpen ? 'true' : 'false',
                   onClick: function toggleJump() {
+                    if (scrollMode) return;
                     if (pageJumpOpen) { setPageJumpOpen(false); return; }
                     dismissPopovers();
-                    setPageJumpDraft(String(page + 1));
+                    setPageJumpDraft(String(pageStart));
                     setPageJumpOpen(true);
                   },
                 }, pageLabel),
@@ -3169,9 +4208,7 @@
                   onSubmit: function jump(event) {
                     event.preventDefault();
                     const target = parseInt(pageJumpDraft, 10);
-                    if (!Number.isNaN(target)) {
-                      setPage(clamp(target, 1, pageCount) - 1);
-                    }
+                    if (!Number.isNaN(target)) setPage(readerPageJumpIndex(target, spread, totalPages, pageCount));
                     setPageJumpOpen(false);
                   },
                 },
@@ -3181,46 +4218,24 @@
                     type: 'number',
                     className: 'sr-page-jump-input',
                     min: 1,
-                    max: pageCount,
+                    max: jumpPageTotal,
                     value: pageJumpDraft,
-                    placeholder: String(page + 1),
+                    placeholder: String(pageStart),
                     onChange: function change(e) { setPageJumpDraft(e.target.value); },
                     onKeyDown: function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); setPageJumpOpen(false); } },
                   }),
-                  h('span', { className: 'sr-page-jump-hint' }, '/ ' + pageCount + (t('jumpPageSuffix') ? ' ' + t('jumpPageSuffix') : '')),
+                  h('span', { className: 'sr-page-jump-hint' }, '/ ' + jumpPageTotal + (t('jumpPageSuffix') ? ' ' + t('jumpPageSuffix') : '')),
                   h('button', { type: 'submit', className: 'sr-page-jump-btn' }, t('jumpBtn')),
                 ) : null,
               ),
-              h('span', {
-                className: 'sr-reader-time',
-                title: t('readerProgress'),
-                onClick: function cycleTime() {
-                  setTimeMode(function next(m) {
-                    if (m === 'chapterTime') return 'bookPercent';
-                    if (m === 'bookPercent') return 'clock';
-                    return 'chapterTime';
-                  });
-                },
-              }, timeMode === 'bookPercent'
-                ? fill(t('tocReadPercent'), { n: overallBookPct }) + (isFullscreen ? ' · ' + clockText : '')
-                : (timeMode === 'clock'
-                  ? clockText
-                  : remainingLabel + (isFullscreen ? ' · ' + clockText : ''))),
             ),
-            h('button', {
-              type: 'button',
-              className: 'sr-reader-tool',
-              'data-on': tts.status === 'idle' ? 'false' : 'true',
-              title: tts.status === 'playing' ? t('pauseReading') : t('readAloud'),
-              onClick: toggleSpeech,
-            },
-              h(Icon, { name: 'volume', size: 15 }),
-              h('span', null, t('readAloud')),
-            ),
-            h('button', { type: 'button', className: 'sr-reader-tool', onClick: function settingsOpenNow() { setSettingsOpen(true); }, title: t('readerSettings') },
-              h(Icon, { name: 'type', size: 14 }),
+            h('button', { type: 'button', className: 'sr-reader-tool', onClick: function openSettings() { setSettingsOpen(true); }, title: t('readerSettings') },
+              h(Icon, { name: 'sliders', size: 14 }),
               h('span', null, t('readerSettings')),
             ),
+            (settings.dockMode === 'thumb' || (settings.dockMode === 'auto' && typeof window !== 'undefined' && window.innerWidth < 760)) ? h('button', { type: 'button', className: 'sr-reader-tool sr-thumb-nav', onClick: function next() { nextPage(); }, title: t('nextPage'), 'aria-label': t('nextPage') },
+              h(Icon, { name: 'chevron-right', size: 15 }),
+            ) : null,
           ),
         ),
         tts.status !== 'idle' ? h('div', {
@@ -3266,7 +4281,7 @@
             }, h(Icon, { name: 'stop', size: 12 })),
           ),
         ) : null,
-        fontHud && !fontQuickOpen ? h('div', { className: 'sr-font-hud', role: 'status', 'aria-live': 'polite' },
+        fontHud ? h('div', { className: 'sr-font-hud', role: 'status', 'aria-live': 'polite' },
           h('span', { className: 'sr-font-hud-glyph', 'aria-hidden': 'true' }, 'Aa'),
           h('strong', null, fontHud + 'px'),
         ) : null,
@@ -3281,6 +4296,15 @@
           'aria-label': t('exitFullscreen'),
           onClick: toggleFullscreen,
         }, h(Icon, { name: 'minimize', size: 12 }), h('span', null, t('exitFullscreen') + ' (Esc)')) : null,
+        tourOpen && !settingsOpen && !drawer ? h('div', { className: 'sr-tour', role: 'status' },
+          h('div', { className: 'sr-tour-head' },
+            h('strong', null, t('tourTitle')),
+            h('button', { type: 'button', className: 'sr-reader-icon', onClick: dismissTour, title: t('tourDismiss'), 'aria-label': t('tourDismiss') }, h(Icon, { name: 'close', size: 13 })),
+          ),
+          h('p', null, t('tourTip1')),
+          h('p', null, t('tourTip2')),
+          h('p', null, t('tourTip3')),
+        ) : null,
         h('div', { className: 'sr-reader-corner', 'aria-hidden': 'true' }),
         drawer === 'toc' ? drawerContents() : null,
         drawer === 'notes' ? drawerNotes() : null,
@@ -3436,8 +4460,13 @@
         footnote ? h('div', {
           role: 'dialog',
           'aria-label': t('footnote'),
-          className: 'sr-footnote-popover',
-          style: {
+          className: 'sr-footnote-popover' + (settings.marginFootnotes ? ' sr-footnote-popover--margin' : ''),
+          style: settings.marginFootnotes ? {
+            left: 'auto',
+            right: (settings.marginNotes ? 286 : 30) + 'px',
+            top: Math.min(Math.max(footnote.y, 70), Math.max(70, (typeof window !== 'undefined' ? window.innerHeight : 900) - 300)) + 'px',
+            transform: 'none',
+          } : {
             left: footnote.x + 'px',
             top: footnote.y + 'px',
             transform: footnote.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',

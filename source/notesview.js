@@ -47,7 +47,8 @@
             lines.push('');
           }
           if (Array.isArray(note.tags) && note.tags.length) {
-            lines.push(note.tags.map(function tag(value) { return '#' + value; }).join(' '));
+            // Obsidian ends a #hashtag at the first space, so a spaced tag is exported hyphenated.
+            lines.push(note.tags.map(function tag(value) { return '#' + String(value).trim().replace(/\s+/g, '-'); }).join(' '));
             lines.push('');
           }
           lines.push('— ' + (chapter ? chapter.title : '') + ' · ' + dateLabel(note.createdAt));
@@ -109,7 +110,7 @@
       const sortedTags = Array.from(byTag.keys()).sort();
       sortedTags.forEach(function tagGroup(tag) {
         const items = byTag.get(tag);
-        lines.push('## #' + tag + ' (' + items.length + ')');
+        lines.push('## #' + String(tag).trim().replace(/\s+/g, '-') + ' (' + items.length + ')');
         lines.push('');
         items.forEach(function entry(note) {
           const book = map.get(note.bookId);
@@ -161,6 +162,8 @@
       useEffect(function escape() {
         function onKey(event) {
           if (event.key !== 'Escape') return;
+          // Escape during IME composition only cancels the candidate.
+          if (event.isComposing || event.keyCode === 229) return;
           event.preventDefault();
           if (renaming) setRenaming(null);
           else if (pendingDelete) setPendingDelete('');
@@ -213,6 +216,7 @@
                       placeholder: t('tagRenamePlaceholder'),
                       onChange: function change(event) { setRenaming({ tag: tag, value: event.target.value }); },
                       onKeyDown: function keys(event) {
+                        if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                         if (event.key === 'Enter') {
                           event.preventDefault();
                           submitRename(tag);
@@ -290,9 +294,10 @@
       const [cardNote, setCardNote] = useState(null);
       const [collectionCard, setCollectionCard] = useState(null);
       const [bookmarkNoteOnly, setBookmarkNoteOnly] = useState(false);
-      const [selectMode, setSelectMode] = useState(false);
+      // initialSelectMode / initialSelected mirror ShelfView: they seed the batch bar for tests.
+      const [selectMode, setSelectMode] = useState(props.initialSelectMode === true);
       const [deleteConfirm, setDeleteConfirm] = useState(false);
-      const [selected, setSelected] = useState([]);
+      const [selected, setSelected] = useState(Array.isArray(props.initialSelected) ? props.initialSelected : []);
       const [editor, setEditor] = useState(null);
       const [bookmarkEditor, setBookmarkEditor] = useState(null);
       const editorRef = useRef(null);
@@ -336,7 +341,6 @@
         setBulkTagDraft('');
         setDeleteConfirm(false);
       }
-      const selectedHighlightIds = selected.filter(function isHighlight(key) { return key.indexOf('h:') === 0; }).map(function id(key) { return key.slice(2); });
       function applyBulkTag(mode) {
         const tag = cleanNoteTags([bulkTagDraft])[0];
         if (!tag || !selectedHighlightIds.length) return;
@@ -449,6 +453,13 @@
         const haystack = (book.title + ' ' + book.author + ' ' + (item.chapterTitle || '') + ' ' + (item.excerpt || '') + ' ' + (item.note || '') + ' ' + fill(t('bookmarkPage'), { n: item.page })).toLowerCase();
         return matchAllTerms(haystack, terms);
       });
+      // A selection outlives tab and filter changes, but bulk actions only ever act on
+      // what is on screen right now; hidden picks are kept and come back with the view.
+      const visibleSelectionKeys = new Set(mode === 'highlights'
+        ? filtered.map(function key(note) { return 'h:' + note.id; })
+        : mode === 'bookmarks' ? filteredBookmarks.map(function key(item) { return 'b:' + item.id; }) : []);
+      const selectedVisible = selected.filter(function shown(key) { return visibleSelectionKeys.has(key); });
+      const selectedHighlightIds = selectedVisible.filter(function isHighlight(key) { return key.indexOf('h:') === 0; }).map(function id(key) { return key.slice(2); });
       const withThoughts = notes.filter(function thought(note) { return Boolean(note.note); }).length;
       const tagCounts = new Map();
       notes.forEach(function collect(note) {
@@ -504,20 +515,15 @@
         return function cleanup() { document.removeEventListener('keydown', onKey, true); };
       }, [bookmarkEditorKey]);
 
-      useEffect(function escapeTagManager() {
-        if (!tagManagerOpen) return undefined;
-        function onKey(event) {
-          if (event.key !== 'Escape') return;
-          setTagManagerOpen(false);
-        }
-        document.addEventListener('keydown', onKey, true);
-        return function cleanup() { document.removeEventListener('keydown', onKey, true); };
-      }, [tagManagerOpen]);
+      // TagManagerDialog owns its own Escape (rename -> pending delete -> close), so the
+      // notebook adds no listener of its own for it.
 
       useEffect(function escapeSelectMode() {
         if (!selectMode) return undefined;
         function onKey(event) {
           if (event.key !== 'Escape') return;
+          // An editor, dialog or inline input already consumed this Escape.
+          if (event.defaultPrevented) return;
           event.preventDefault();
           if (deleteConfirm) { setDeleteConfirm(false); return; }
           if (bulkColorOpen) { setBulkColorOpen(false); return; }
@@ -697,7 +703,7 @@
                 type: 'button',
                 className: 'sr-link-btn',
                 onClick: function clearThought() {
-                  props.updateHighlight(note.id, { note: '' });
+                  props.onUpdateHighlight(note.id, { note: '' });
                   props.showToast(t('thoughtCleared'));
                 },
               }, t('clearThought')) : null,
@@ -879,16 +885,16 @@
             h('div', { className: 'sr-shelf-delete-bar sr-batch-popover', role: 'alertdialog' },
               h('div', { className: 'sr-batch-popover-danger-head' },
                 h(Icon, { name: 'trash', size: 14 }),
-                h('span', null, fill(t('confirmDeleteNotes'), { n: selected.length })),
+                h('span', null, fill(t('confirmDeleteNotes'), { n: selectedVisible.length })),
               ),
               h('div', { className: 'sr-shelf-delete-actions' },
                 h('button', { type: 'button', className: 'sr-btn sr-btn-sm', onClick: function cancel() { setDeleteConfirm(false); } }, t('cancel')),
                 h('button', {
                   type: 'button',
                   className: 'sr-btn sr-btn-sm sr-btn-danger',
-                  disabled: !selected.length,
+                  disabled: !selectedVisible.length,
                   onClick: function confirmDelete() {
-                    const selection = splitSelectionKeys(selected);
+                    const selection = splitSelectionKeys(selectedVisible);
                     props.onBulkDelete(selection.highlightIds, selection.bookmarkIds);
                     exitSelect();
                   },
@@ -968,6 +974,7 @@
                   'aria-label': t('bulkTagPlaceholder'),
                   onChange: function change(event) { setBulkTagDraft(event.target.value); },
                   onKeyDown: function keys(event) {
+                    if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                     if (event.key === 'Enter') {
                       event.preventDefault();
                       applyBulkTag('add');
@@ -997,7 +1004,7 @@
             h('div', { className: 'sr-shelf-select-main' },
               h('div', { className: 'sr-shelf-select-summary' },
                 h('span', { className: 'sr-shelf-select-dot', 'aria-hidden': 'true' }),
-                h('strong', { className: 'sr-shelf-select-count' }, fill(t('selectedCount'), { n: selected.length })),
+                h('strong', { className: 'sr-shelf-select-count' }, fill(t('selectedCount'), { n: selectedVisible.length })),
               ),
               h('div', { className: 'sr-shelf-select-links' },
                 h('button', {
@@ -1021,7 +1028,7 @@
                 h('button', {
                   type: 'button',
                   className: 'sr-link-btn',
-                  disabled: !selected.length,
+                  disabled: !selectedVisible.length,
                   onClick: function clear() { setSelected([]); },
                 }, t('clearSelection')),
               ),
@@ -1062,9 +1069,9 @@
               h('button', {
                 type: 'button',
                 className: 'sr-bulk-action',
-                disabled: !selected.length,
+                disabled: !selectedVisible.length,
                 onClick: function copySelectedNotes() {
-                  const markdown = selectedAnnotationsMarkdown(selected, props.highlights, props.bookmarks, props.books, t);
+                  const markdown = selectedAnnotationsMarkdown(selectedVisible, props.highlights, props.bookmarks, props.books, t);
                   copyTextToClipboard(markdown).then(function done(ok) {
                     props.showToast(ok ? t('selectedCopied') : t('copyFailed'));
                   });
@@ -1073,9 +1080,9 @@
               h('button', {
                 type: 'button',
                 className: 'sr-bulk-action',
-                disabled: !selected.length,
+                disabled: !selectedVisible.length,
                 onClick: function exportSelected() {
-                  const markdown = selectedAnnotationsMarkdown(selected, props.highlights, props.bookmarks, props.books, t);
+                  const markdown = selectedAnnotationsMarkdown(selectedVisible, props.highlights, props.bookmarks, props.books, t);
                   const ok = downloadMarkdownFile('shiguang-selected-notes-' + dayKey() + '.md', markdown);
                   props.showToast(ok ? t('selectedExported') : t('exportFailed'));
                 },
@@ -1084,7 +1091,7 @@
                 type: 'button',
                 className: 'sr-bulk-action sr-bulk-danger',
                 'data-danger': 'true',
-                disabled: !selected.length,
+                disabled: !selectedVisible.length,
                 onClick: function requestDelete() {
                   setDeleteConfirm(true);
                   setBulkTagOpen(false);
@@ -1416,6 +1423,7 @@
               'aria-label': t('notePlaceholder'),
               onChange: function change(event) { setEditor(Object.assign({}, editor, { note: event.target.value })); },
               onKeyDown: function keys(event) {
+                if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                 if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                   event.preventDefault();
                   saveEditor();
@@ -1443,6 +1451,7 @@
                 'aria-label': t('noteTagPlaceholder'),
                 onChange: function change(event) { setTagDraft(event.target.value); },
                 onKeyDown: function keys(event) {
+                  if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                   if (event.key === 'Enter' || event.key === '，' || event.key === ',') {
                     event.preventDefault();
                     addEditorTag(tagDraft);
@@ -1503,6 +1512,7 @@
               'aria-label': t('bookmarkNotePlaceholder'),
               onChange: function change(event) { setBookmarkEditor(Object.assign({}, bookmarkEditor, { note: event.target.value })); },
               onKeyDown: function keys(event) {
+                if ((event.nativeEvent && event.nativeEvent.isComposing) || event.keyCode === 229) return;
                 if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                   event.preventDefault();
                   props.onUpdateBookmark(bookmarkEditor.id, { note: bookmarkEditor.note });

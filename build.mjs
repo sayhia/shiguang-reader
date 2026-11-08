@@ -3,12 +3,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const order = ['head.js', 'locale.js', 'books.js', 'styles.js', 'fsstore.js', 'core.js', 'quotecard.js', 'monthlycard.js', 'epub.js', 'shelf.js', 'notesview.js', 'reader.js', 'palette.js', 'app.js', 'tail.js'];
+const order = ['head.js', 'locale.js', 'books.js', 'styles.js', 'fsstore.js', 'core.js', 'quotecard.js', 'monthlycard.js', 'epub.js', 'formats.js', 'shelf.js', 'notesview.js', 'reader.js', 'palette.js', 'app.js', 'tail.js'];
 const source = order.map((name) => readFileSync(join(root, 'source', name), 'utf8')).join('\n');
 
 // Standalone parser bundle for the import worker pool. It includes only books,
-// parsing helpers and EPUB code: no React components, no UI, no file-system writes.
-const workerParts = ['books.js', 'core.js', 'epub.js']
+// parsing helpers, EPUB and the other book formats: no React components, no UI, no file-system writes.
+const workerParts = ['books.js', 'core.js', 'epub.js', 'formats.js']
   .map((name) => readFileSync(join(root, 'source', name), 'utf8'));
 const workerSource = [
   'const window = self;',
@@ -27,7 +27,7 @@ self.onmessage = async function (event) {
       book = await parseEpubBook(job.name, job.file, { skipImageBytes: true });
     } else {
       const bytes = new Uint8Array(await job.file.arrayBuffer());
-      book = parseImportedBook(job.name, decodeTextBytes(bytes));
+      book = await parseBookBytesSafely(job.kind, job.name, bytes);
     }
     self.postMessage({ id: job.id, ok: true, book: book });
   } catch (error) {

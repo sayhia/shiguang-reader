@@ -151,6 +151,39 @@
         .replace(/&quot;/g, '"');
     }
 
+    // Paragraph HTML reaches the reader through dangerouslySetInnerHTML, and a
+    // paragraph may carry raw tags from a TXT/Markdown file or tags an EPUB smuggled
+    // in as entities (decoded after import sanitizing). Rebuild every tag from the
+    // same allowlist the EPUB importer uses and drop the rest, so no handler, script
+    // or javascript: link ever reaches the DOM. Dropped tags are invisible to
+    // stripHtmlTags as well, so text offsets (highlights) do not move.
+    function safeReaderHref(value) {
+      const decoded = String(value || '')
+        .replace(/&#x([0-9a-f]+);?/gi, function hex(m, code) { const cp = parseInt(code, 16); return cp <= 0x10ffff ? String.fromCodePoint(cp) : ''; })
+        .replace(/&#(\d+);?/g, function dec(m, code) { const cp = Number(code); return cp <= 0x10ffff ? String.fromCodePoint(cp) : ''; })
+        .replace(/&colon;?/gi, ':')
+        .replace(/&(?:tab|newline);?/gi, '')
+        .replace(/[\u0000-\u0020\u007f-\u009f]/g, '');
+      const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(decoded);
+      return !scheme || /^(?:https?|mailto)$/i.test(scheme[1]);
+    }
+
+    function sanitizeReaderHtml(html) {
+      return String(html || '').replace(/<\/?([a-z0-9]+)\b([^>]*)>/gi, function keepTag(match, tagName, attrs) {
+        const tag = tagName.toLowerCase();
+        if (!ALLOWED_EPUB_INLINE_TAGS.has(tag) && !PRESERVED_EPUB_BLOCK_TAGS.has(tag)) return '';
+        if (match.startsWith('</')) return '</' + tag + '>';
+        let safeAttrs = '';
+        ['href', 'class', 'id', 'name', 'role', 'epub:type', 'align', 'colspan', 'rowspan'].forEach(function keepAttr(attr) {
+          const found = attrs.match(new RegExp('(?:^|\\s)' + attr + '\\s*=\\s*("[^"]*"|\'[^\']*\')', 'i'));
+          if (!found) return;
+          if (attr === 'href' && !safeReaderHref(found[1].slice(1, -1))) return;
+          safeAttrs += ' ' + attr + '=' + found[1];
+        });
+        return '<' + tag + safeAttrs + '>';
+      });
+    }
+
     function chapterText(chapter) {
       // Picture lines are not prose: keeping them out of this join keeps them out of
       // search snippets, read-aloud chunks, word counts and excerpts.
@@ -623,6 +656,11 @@
       }
     }
 
+    // `$$a+b$$` on a single line: a display formula that opens and closes itself.
+    function isSelfClosedMath(trimmed) {
+      return trimmed.length >= 4 && trimmed.startsWith('$$') && trimmed.endsWith('$$');
+    }
+
     function parseImportedBook(fileName, raw) {
       const normalized = String(raw || '').replace(/\r\n?/g, '\n').replace(/\u0000/g, '').trim();
       if (!normalized) {
@@ -658,11 +696,35 @@
       }
 
       const isMdFile = /\.(md|markdown)$/i.test(fileName) || lines.some(function(l) { return /^#{1,3}\s+/.test(l.trim()); });
-      const hasH1 = isMdFile && lines.some(function(l) { return /^#\s+[^\n]+/.test(l.trim()); });
-      const hasH2 = isMdFile && lines.some(function(l) { return /^##\s+[^\n]+/.test(l.trim()); });
-
       const headingPattern = /^(?:第[0-9零〇一二两三四五六七八九十百千万]+[章节回卷篇部](?:[ 　:：·、.\-—].{0,44})?|卷[0-9零〇一二三四五六七八九十百]+(?:[ 　:：·、.\-—].{0,36})?|(?:序章|楔子|引子|尾声|后记|前言|序言|番外)(?:[ 　:：·、.\-—].{0,34})?|chapter\s+[0-9ivxlc]+(?:[ 　:：·、.\-—].{0,44})?|#{1,4}\s+.+)$/i;
       const chapterNamePattern = /^(?:第[0-9零〇一二两三四五六七八九十百千万]+[章节回卷篇部]|卷[0-9零〇一二三四五六七八九十百]+|(?:序章|楔子|引子|尾声|后记|前言|序言|番外)|chapter\s+[0-9ivxlc]+)/i;
+      // Heading levels are judged only on lines outside fenced code and $$ math, so a
+      // `# comment` in a shell snippet does not decide how the book is split. A
+      // lone `# Title` on the first content line is the book title, not the only
+      // chapter: it must not stop `##` headings from being the chapter breaks.
+      let scanFence = false;
+      let scanMath = false;
+      let h1Count = 0;
+      let firstContentIndex = -1;
+      let firstContentIsH1 = false;
+      let sawH2 = false;
+      lines.forEach(function scan(l, i) {
+        const tr = l.trim();
+        if (tr.startsWith('```') || tr.startsWith('~~~')) { scanFence = !scanFence; return; }
+        if (scanFence) return;
+        if (scanMath) { if (tr.endsWith('$$')) scanMath = false; return; }
+        if (tr.startsWith('$$')) { if (!isSelfClosedMath(tr)) scanMath = true; return; }
+        if (!tr) return;
+        const isH1 = /^#\s+[^\n]+/.test(tr);
+        if (firstContentIndex < 0) { firstContentIndex = i; firstContentIsH1 = isH1 && !chapterNamePattern.test(cleanHeading(tr)); }
+        if (isH1) h1Count += 1;
+        if (/^##\s+[^\n]+/.test(tr)) sawH2 = true;
+      });
+      const leadingTitleH1 = isMdFile && sawH2 && h1Count === 1 && firstContentIsH1;
+      const titleLineIndex = leadingTitleH1 ? firstContentIndex : -1;
+      const hasH1 = isMdFile && h1Count > 0 && !leadingTitleH1;
+      const hasH2 = isMdFile && sawH2;
+
       const blankSeparated = /\n[ \t]*\n/.test(normalized);
       const chapters = [];
       let chapterTitle = '';
@@ -695,8 +757,9 @@
         return text.replace(/^\*+|\*+$/g, '').trim().slice(0, 64);
       }
 
-      lines.forEach(function each(line) {
+      lines.forEach(function each(line, lineIndex) {
         const trimmed = line.trim();
+        if (lineIndex === titleLineIndex) return;
 
         // 1. Fenced code block: do not parse headings or split paragraphs inside
         if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
@@ -710,15 +773,20 @@
           return;
         }
 
-        // 2. Math block ($$)
-        if (trimmed.startsWith('$$')) {
-          inMathBlock = !inMathBlock;
-          buffer.push(line);
-          if (!inMathBlock) flushParagraph();
-          return;
-        }
+        // 2. Math block ($$). `$$a+b$$` on one line opens and closes itself; inside
+        // a block, a line ending in `$$` closes it.
         if (inMathBlock) {
           buffer.push(line);
+          if (trimmed.endsWith('$$')) {
+            inMathBlock = false;
+            flushParagraph();
+          }
+          return;
+        }
+        if (trimmed.startsWith('$$')) {
+          buffer.push(line);
+          if (isSelfClosedMath(trimmed)) flushParagraph();
+          else inMathBlock = true;
           return;
         }
 
@@ -804,7 +872,6 @@
       if (chapters.length === 1 && totalChars > 3400) {
         finalChapters = splitLongChapter(chapters[0], 2800);
       }
-      if (finalChapters.length > 320) finalChapters = finalChapters.slice(0, 320);
       const seed = hashString(title + ':' + normalized.length);
       const cover = LOCAL_COVERS[seed % LOCAL_COVERS.length];
       return {
@@ -916,65 +983,226 @@
       return { type: type, lines: bodyLines };
     }
 
+    // One parse of a paragraph's inline Markdown, shared by renderInline and the
+    // raw↔rendered offset map. Each piece knows where it sits in the raw text
+    // (`rawStart`..`rawEnd`, markers included), where its visible words begin in the
+    // raw text (`contentStart`), and the visible words themselves (`content`). A
+    // footnote reference is atomic: it shows `[n]`, which is not a run of the raw
+    // `[^n]`, so a highlight never starts or ends inside it.
+    const INLINE_TOKEN_SOURCE = '(\\*\\*([^*]+)\\*\\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|\\[\\^([^\\]]+)\\]|\\[([^\\]]+)\\]\\(([^)]+)\\)|\\*([^*]+)\\*|_([^_]+)_|\\$([^\\$]+)\\$)';
+
+    function parseInline(text) {
+      const source = typeof text === 'string' ? text : '';
+      if (!source) return [];
+      if (!/[*_~`$\[]/.test(source)) return [{ type: 'text', rawStart: 0, rawEnd: source.length, contentStart: 0, content: source }];
+      const tokenRegex = new RegExp(INLINE_TOKEN_SOURCE, 'g');
+      const pieces = [];
+      let lastIndex = 0;
+      let match;
+      function token(type, inner, open, extra) {
+        return Object.assign({
+          type: type,
+          rawStart: match.index,
+          rawEnd: match.index + match[0].length,
+          contentStart: match.index + open,
+          content: inner,
+        }, extra || null);
+      }
+      while ((match = tokenRegex.exec(source)) !== null) {
+        if (match.index > lastIndex) {
+          pieces.push({ type: 'text', rawStart: lastIndex, rawEnd: match.index, contentStart: lastIndex, content: source.slice(lastIndex, match.index) });
+        }
+        if (match[2] !== undefined) pieces.push(token('strong', match[2], 2));
+        else if (match[3] !== undefined) pieces.push(token('strong', match[3], 2));
+        else if (match[4] !== undefined) pieces.push(token('del', match[4], 2));
+        else if (match[5] !== undefined) pieces.push(token('code', match[5], 1));
+        else if (match[6] !== undefined) pieces.push(token('footnote', '[' + match[6] + ']', 0, { atomic: true, fnId: match[6] }));
+        else if (match[7] !== undefined) pieces.push(token('link', match[7], 1, { href: match[8] }));
+        else if (match[9] !== undefined) pieces.push(token('em', match[9], 1));
+        else if (match[10] !== undefined) pieces.push(token('em', match[10], 1));
+        else if (match[11] !== undefined) pieces.push(token('math', match[11], 1));
+        lastIndex = tokenRegex.lastIndex;
+      }
+      if (lastIndex < source.length) {
+        pieces.push({ type: 'text', rawStart: lastIndex, rawEnd: source.length, contentStart: lastIndex, content: source.slice(lastIndex) });
+      }
+      return pieces;
+    }
+
+    function renderInlinePiece(piece, content, key) {
+      if (piece.type === 'text') return content;
+      if (piece.type === 'strong') return h('strong', { key: key }, content);
+      if (piece.type === 'del') return h('del', { key: key }, content);
+      if (piece.type === 'code') return h('code', { key: key }, content);
+      if (piece.type === 'em') return h('em', { key: key }, content);
+      if (piece.type === 'math') return h('span', { key: key, className: 'sr-math-inline' }, h('code', null, content));
+      if (piece.type === 'footnote') {
+        return h('sup', { key: key, className: 'sr-footnote-ref' },
+          h('a', {
+            href: '#fn-' + piece.fnId,
+            'epub:type': 'noteref',
+            role: 'doc-noteref',
+            className: 'sr-link sr-noteref',
+          }, piece.content)
+        );
+      }
+      const linkHref = piece.href;
+      const isExternal = /^https?:\/\//i.test(linkHref) || /^mailto:/i.test(linkHref);
+      const isDangerous = /^(javascript|vbscript|data):/i.test(linkHref.trim());
+      return h('a', {
+        key: key,
+        className: 'sr-link',
+        href: isDangerous ? undefined : linkHref,
+        target: isExternal ? '_blank' : undefined,
+        rel: isExternal ? 'noopener noreferrer' : undefined,
+      }, content);
+    }
+
     function renderInline(text, keyPrefix) {
       if (!text) return [text];
       if (typeof text !== 'string') return [text];
       if (!/[*_~`$\[]/.test(text)) return [text];
-
-      const tokenRegex = /(\*\*([^*]+)\*\*|__([^_]+)__|~~([^~]+)~~|`([^`]+)`|\[\^([^\]]+)\]|\[([^\]]+)\]\(([^)]+)\)|\*([^*]+)\*|_([^_]+)_|\$([^\$]+)\$)/g;
       const nodes = [];
-      let lastIndex = 0;
-      let match;
       let idx = 0;
-
-      while ((match = tokenRegex.exec(text)) !== null) {
-        if (match.index > lastIndex) {
-          nodes.push(text.slice(lastIndex, match.index));
-        }
-        const k = (keyPrefix || 'md') + '-' + (idx++);
-        if (match[2] !== undefined) {
-          nodes.push(h('strong', { key: k }, match[2]));
-        } else if (match[3] !== undefined) {
-          nodes.push(h('strong', { key: k }, match[3]));
-        } else if (match[4] !== undefined) {
-          nodes.push(h('del', { key: k }, match[4]));
-        } else if (match[5] !== undefined) {
-          nodes.push(h('code', { key: k }, match[5]));
-        } else if (match[6] !== undefined) {
-          const fnId = match[6];
-          nodes.push(h('sup', { key: k, className: 'sr-footnote-ref' },
-            h('a', {
-              href: '#fn-' + fnId,
-              'epub:type': 'noteref',
-              role: 'doc-noteref',
-              className: 'sr-link sr-noteref',
-            }, '[' + fnId + ']')
-          ));
-        } else if (match[7] !== undefined) {
-          const linkText = match[7];
-          const linkHref = match[8];
-          const isExternal = /^https?:\/\//i.test(linkHref) || /^mailto:/i.test(linkHref);
-          const isDangerous = /^(javascript|vbscript|data):/i.test(linkHref.trim());
-          nodes.push(h('a', {
-            key: k,
-            className: 'sr-link',
-            href: isDangerous ? undefined : linkHref,
-            target: isExternal ? '_blank' : undefined,
-            rel: isExternal ? 'noopener noreferrer' : undefined,
-          }, linkText));
-        } else if (match[9] !== undefined) {
-          nodes.push(h('em', { key: k }, match[9]));
-        } else if (match[10] !== undefined) {
-          nodes.push(h('em', { key: k }, match[10]));
-        } else if (match[11] !== undefined) {
-          nodes.push(h('span', { key: k, className: 'sr-math-inline' }, h('code', null, match[11])));
-        }
-        lastIndex = tokenRegex.lastIndex;
-      }
-      if (lastIndex < text.length) {
-        nodes.push(text.slice(lastIndex));
-      }
+      parseInline(text).forEach(function each(piece) {
+        if (piece.type === 'text') nodes.push(piece.content);
+        else nodes.push(renderInlinePiece(piece, piece.content, (keyPrefix || 'md') + '-' + (idx++)));
+      });
       return nodes.length ? nodes : [text];
+    }
+
+    // Offset map for one paragraph whose visible text is `renderInline(inline)` and
+    // whose raw text holds `inline` at `prefix` (a heading's `## `, say). Stored
+    // highlight offsets live in raw paragraph text (chapterBaseOffsets/chapterText);
+    // a selection is measured in the rendered DOM text. On a plain paragraph both
+    // are the same string and the map is the identity.
+    function inlineOffsetMap(inline, prefix) {
+      const pieces = parseInline(inline);
+      let cursor = 0;
+      pieces.forEach(function place(piece) {
+        piece.rendStart = cursor;
+        cursor += piece.content.length;
+        piece.rendEnd = cursor;
+      });
+      return {
+        prefix: Math.max(0, Number(prefix) || 0),
+        rawLength: typeof inline === 'string' ? inline.length : 0,
+        rendered: pieces.map(function text(piece) { return piece.content; }).join(''),
+        pieces: pieces,
+      };
+    }
+
+    // Rendered position → raw paragraph offset. A position on a piece boundary maps
+    // to the raw boundary, so a selection that covers a whole bold word keeps its
+    // `**` pair. `bias` 'end' rounds a position inside an atomic piece up.
+    function inlineRawOffset(map, pos, bias) {
+      if (!map) return Math.max(0, Number(pos) || 0);
+      const target = Math.max(0, Number(pos) || 0);
+      for (let i = 0; i < map.pieces.length; i += 1) {
+        const piece = map.pieces[i];
+        if (target <= piece.rendStart) return map.prefix + piece.rawStart;
+        if (target < piece.rendEnd) {
+          if (piece.atomic) return map.prefix + (bias === 'end' ? piece.rawEnd : piece.rawStart);
+          return map.prefix + piece.contentStart + (target - piece.rendStart);
+        }
+      }
+      return map.prefix + map.rawLength;
+    }
+
+    // Raw paragraph offset → rendered position. An offset that falls on a marker
+    // (`**`, `](url)`) is pulled to the nearest visible edge of its piece, and one
+    // inside a footnote reference to its start or (with bias 'end') its end, so a
+    // highlight never splits a token.
+    function inlineRenderedOffset(map, raw, bias) {
+      if (!map) return Math.max(0, Number(raw) || 0);
+      const local = (Number(raw) || 0) - map.prefix;
+      if (local <= 0) return 0;
+      for (let i = 0; i < map.pieces.length; i += 1) {
+        const piece = map.pieces[i];
+        if (local <= piece.rawStart) return piece.rendStart;
+        if (local < piece.rawEnd) {
+          if (piece.atomic) return bias === 'end' ? piece.rendEnd : piece.rendStart;
+          return piece.rendStart + clamp(local - piece.contentStart, 0, piece.content.length);
+        }
+      }
+      return map.rendered.length;
+    }
+
+    // Nodes for the rendered run [from, to) of a mapped paragraph. A token cut by
+    // the run boundary is drawn as the same element around its share of the words.
+    function renderInlineRange(map, from, to, keyPrefix) {
+      const nodes = [];
+      map.pieces.forEach(function each(piece, index) {
+        if (piece.rendEnd <= from || piece.rendStart >= to) return;
+        if (piece.atomic) {
+          if (piece.rendStart >= from) nodes.push(renderInlinePiece(piece, piece.content, keyPrefix + '-' + index));
+          return;
+        }
+        const content = piece.content.slice(Math.max(from, piece.rendStart) - piece.rendStart, Math.min(to, piece.rendEnd) - piece.rendStart);
+        if (content) nodes.push(renderInlinePiece(piece, content, keyPrefix + '-' + index));
+      });
+      return nodes;
+    }
+
+    // A reader selection (two points, each a paragraph index and an offset in that
+    // paragraph's rendered text) → the stored highlight: raw chapter offsets and the
+    // words the reader saw. `maps[i]` is the paragraph's inlineOffsetMap, or absent
+    // when its rendered text is its clean raw text. Whitespace at either end is
+    // dropped; a selection of nothing but whitespace gives null.
+    function selectionHighlightRange(paragraphs, baseOffsets, maps, first, second) {
+      const list = Array.isArray(paragraphs) ? paragraphs : [];
+      const bases = Array.isArray(baseOffsets) ? baseOffsets : [];
+      const mapList = maps || [];
+      if (!first || !second) return null;
+      function visible(index) {
+        const map = mapList[index];
+        if (map) return map.rendered;
+        const text = list[index];
+        if (typeof text !== 'string' || imageParagraph(text)) return '';
+        return /<[a-z][\s\S]*>/i.test(text) ? stripHtmlTags(text) : text;
+      }
+      function prose(index) { return typeof list[index] === 'string' && !imageParagraph(list[index]); }
+      const ordered = (first.paragraph < second.paragraph || (first.paragraph === second.paragraph && first.local <= second.local))
+        ? [first, second] : [second, first];
+      let sp = ordered[0].paragraph;
+      let so = clamp(Number(ordered[0].local) || 0, 0, visible(sp).length);
+      let ep = ordered[1].paragraph;
+      let eo = clamp(Number(ordered[1].local) || 0, 0, visible(ep).length);
+      function before(p1, o1, p2, o2) { return p1 < p2 || (p1 === p2 && o1 < o2); }
+      // Skip leading whitespace (and paragraph breaks) forward.
+      for (;;) {
+        const s = visible(sp);
+        while (so < s.length && /\s/.test(s.charAt(so)) && before(sp, so, ep, eo)) so += 1;
+        if (so < s.length || sp >= ep) break;
+        let next = sp + 1;
+        while (next < ep && !prose(next)) next += 1;
+        sp = next;
+        so = 0;
+      }
+      // Skip trailing whitespace backward.
+      for (;;) {
+        const s = visible(ep);
+        while (eo > 0 && /\s/.test(s.charAt(eo - 1)) && before(sp, so, ep, eo)) eo -= 1;
+        if (eo > 0 || ep <= sp) break;
+        let prev = ep - 1;
+        while (prev > sp && !prose(prev)) prev -= 1;
+        ep = prev;
+        eo = visible(ep).length;
+      }
+      if (!before(sp, so, ep, eo)) return null;
+      const parts = [];
+      for (let i = sp; i <= ep; i += 1) {
+        if (i !== sp && i !== ep && !prose(i)) continue;
+        const s = visible(i);
+        parts.push(s.slice(i === sp ? so : 0, i === ep ? eo : s.length));
+      }
+      const text = parts.join('\n');
+      if (!text.trim()) return null;
+      if (typeof bases[sp] !== 'number' || typeof bases[ep] !== 'number') return null;
+      const start = bases[sp] + inlineRawOffset(mapList[sp], so, 'start');
+      const end = bases[ep] + inlineRawOffset(mapList[ep], eo, 'end');
+      if (end <= start) return null;
+      return { start: start, end: end, text: text };
     }
 
     function injectHighlightIntoHtml(html, start, end, hl) {
@@ -983,7 +1211,8 @@
       let result = '';
       let markOpen = false;
       const colorVal = hl.colorVal || '#f6c343';
-      const openTag = '<mark class="sr-hl" data-hl="' + hl.id + '" data-style="' + (hl.style || 'highlight') + '" data-note="' + (hl.note ? 'true' : 'false') + '" style="--sr-hl: ' + colorVal + '">';
+      const attr = function escapeAttr(value) { return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+      const openTag = '<mark class="sr-hl" data-hl="' + attr(hl.id) + '" data-style="' + attr(hl.style || 'highlight') + '" data-note="' + (hl.note ? 'true' : 'false') + '" style="--sr-hl: ' + attr(colorVal) + '">';
       const closeTag = '</mark>';
 
       for (let i = 0; i < html.length; i++) {
@@ -1039,7 +1268,23 @@
       return currentHtml;
     }
 
+    function adaptiveReaderDefaults() {
+      const mobile = typeof window !== 'undefined' && Number(window.innerWidth) > 0 && Number(window.innerWidth) < 760;
+      return {
+        layout: 'page',
+        pageWidth: mobile ? 'compact' : 'comfortable',
+        thumbDock: mobile,
+      };
+    }
+
+    function pageWidthPixels(pageWidth, pageWidthPx) {
+      const mode = ['compact', 'comfortable', 'wide', 'full', 'custom'].indexOf(pageWidth) >= 0 ? pageWidth : 'comfortable';
+      if (mode === 'custom') return Math.max(560, Math.min(1600, Math.round(Number(pageWidthPx) || 860)));
+      return ({ compact: 680, comfortable: 860, wide: 1120, full: 1180 })[mode] || 860;
+    }
+
     function defaultState() {
+      const adaptive = adaptiveReaderDefaults();
       return {
         v: 1,
         settings: {
@@ -1049,14 +1294,24 @@
           fontFamily: 'serif',
           letterSpacing: 0.02,
           paragraphSpacing: 0.9,
-          pageWidth: 'comfortable',
-          autoHideChrome: false,
-          paperSound: false,
+          pageWidth: adaptive.pageWidth,
+          pageWidthPx: adaptive.pageWidth === 'compact' ? 680 : 860,
+          immersive: false,
+          layout: adaptive.layout,
+          spreadGutter: 'comfortable',
+          spreadRule: true,
+          marginNotes: false,
+          marginFootnotes: false,
+          chapterRail: false,
+          imageLayout: 'inline',
+          imageLayouts: {},
+          bookSettings: {},
+          writingMode: 'horizontal',
+          preset: 'classic',
           highlightColor: 'amber',
           speechRate: 1,
-          speechVoice: '',
-          textAlign: 'justify',
-          readingRuler: false,
+          readingGuide: 'none',
+          dockMode: 'auto',
         },
         customBooks: [],
         progress: {},
@@ -1079,26 +1334,64 @@
 
     function clampSettings(raw) {
       const value = raw && typeof raw === 'object' ? raw : {};
-      const themes = ['paper', 'candle', 'snow', 'mint', 'forest', 'night', 'oled', 'eink', 'auto'];
-      const widths = ['compact', 'comfortable', 'wide'];
+      const adaptive = adaptiveReaderDefaults();
+      const themes = ['paper', 'candle', 'snow', 'night', 'eink', 'auto'];
+      const widths = ['compact', 'comfortable', 'wide', 'full', 'custom'];
       const letterValue = Number(value.letterSpacing);
       const paragraphValue = Number(value.paragraphSpacing);
       return {
-        theme: themes.indexOf(value.theme) >= 0 ? value.theme : 'paper',
+        theme: themes.indexOf(value.theme) >= 0 ? value.theme : ({ mint: 'eink', forest: 'night', oled: 'night', auto: 'paper' }[value.theme] || 'paper'),
         fontSize: clamp(Number(value.fontSize) || FONT_SIZE_DEFAULT, FONT_SIZE_MIN, FONT_SIZE_MAX),
         lineHeight: clamp(Number(value.lineHeight) || 1.95, 1.5, 2.35),
         fontFamily: ['serif', 'sans', 'kai', 'dyslexic', 'system'].indexOf(value.fontFamily) >= 0 ? value.fontFamily : 'serif',
         letterSpacing: clamp(Number.isFinite(letterValue) ? letterValue : 0.02, 0, 0.12),
         paragraphSpacing: clamp(Number.isFinite(paragraphValue) ? paragraphValue : 0.9, 0.5, 1.8),
-        pageWidth: widths.indexOf(value.pageWidth) >= 0 ? value.pageWidth : 'comfortable',
-        autoHideChrome: value.autoHideChrome === true,
-        paperSound: value.paperSound === true,
+        pageWidth: widths.indexOf(value.pageWidth) >= 0 ? value.pageWidth : adaptive.pageWidth,
+        pageWidthPx: Math.max(560, Math.min(1600, Math.round(Number(value.pageWidthPx) || (adaptive.pageWidth === 'compact' ? 680 : 860)))),
+        immersive: value.immersive === true || value.autoHideChrome === true,
+        layout: value.layout === 'essay' ? 'spread' : (['page', 'spread', 'scroll'].indexOf(value.layout) >= 0 ? value.layout : adaptive.layout),
+        spreadGutter: value.spreadGutter === 'compact' ? 'compact' : 'comfortable',
+        spreadRule: value.spreadRule !== false,
+        marginNotes: value.marginNotes === true,
+        marginFootnotes: value.marginFootnotes === true,
+        chapterRail: value.chapterRail === true,
+        imageLayout: ['inline', 'wide', 'margin'].indexOf(value.imageLayout) >= 0 ? value.imageLayout : 'inline',
+        bookSettings: clampBookSettings(value.bookSettings),
+        imageLayouts: (function normalizeImageLayouts() {
+          const source = value.imageLayouts && typeof value.imageLayouts === 'object' && !Array.isArray(value.imageLayouts) ? value.imageLayouts : {};
+          const out = {};
+          Object.keys(source).slice(0, 200).forEach(function each(id) {
+            if (typeof id !== 'string' || !id || id.length > 200) return;
+            if (['inline', 'wide', 'margin'].indexOf(source[id]) >= 0) out[id] = source[id];
+          });
+          return out;
+        })(),
+        writingMode: value.writingMode === 'vertical' ? 'vertical' : 'horizontal',
+        // 'night' was a layout preset until it was removed; its settings stay as they
+        // were, so a saved 'night' simply reads as a custom combination now.
+        preset: value.preset === 'night' ? 'custom' : (['classic', 'magazine', 'minimal', 'custom'].indexOf(value.preset) >= 0 ? value.preset : 'classic'),
         highlightColor: HIGHLIGHT_COLORS.some(function color(item) { return item.id === value.highlightColor; }) ? value.highlightColor : 'amber',
         speechRate: clamp(Number(value.speechRate) || 1, 0.5, 2),
-        speechVoice: typeof value.speechVoice === 'string' ? value.speechVoice.slice(0, 200) : '',
-        textAlign: value.textAlign === 'left' ? 'left' : 'justify',
-        readingRuler: value.readingRuler === true,
+        readingGuide: ['none', 'ruler', 'focus'].indexOf(value.readingGuide) >= 0 ? value.readingGuide : value.focusMode === true ? 'focus' : value.readingRuler === true ? 'ruler' : 'none',
+        dockMode: ['auto', 'standard', 'minimal', 'thumb'].indexOf(value.dockMode) >= 0 ? value.dockMode : (value.thumbDock === true ? 'thumb' : value.minimalDock === false ? 'standard' : 'auto'),
       };
+    }
+
+    function clampBookSettings(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+      const out = {};
+      Object.keys(raw).slice(0, 100).forEach(function each(bookId) {
+        if (typeof bookId !== 'string' || !bookId || bookId.length > 200) return;
+        const entry = raw[bookId];
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+        const normalized = clampSettings(entry);
+        const partial = {};
+        Object.keys(entry).forEach(function key(key) {
+          if (Object.prototype.hasOwnProperty.call(normalized, key) && key !== 'bookSettings') partial[key] = normalized[key];
+        });
+        if (Object.keys(partial).length) out[bookId] = partial;
+      });
+      return out;
     }
 
     // One font-size step inside the supported range; keeps keyboard stepping honest at both ends.
@@ -1119,7 +1412,9 @@
         date.setHours(0, 0, 0, 0);
         return date.getTime();
       }
-      let days = Math.floor((startOfDay(current) - startOfDay(time)) / 86400000);
+      // Round, not floor: across a spring-forward DST change two local midnights are
+      // only 23 hours apart, and flooring would make yesterday read as "today".
+      let days = Math.round((startOfDay(current) - startOfDay(time)) / 86400000);
       if (days <= 0) return { key: 'lastReadToday', n: 0 };
       if (days === 1) return { key: 'lastReadYesterday', n: 1 };
       if (days < 30) return { key: 'lastReadDaysAgo', n: days };
@@ -1319,11 +1614,24 @@
           return typeof part === 'string' && part.trim().length > 0;
         });
         if (!paragraphs.length) return null;
-        return {
+        const out = {
           id: typeof item.id === 'string' ? item.id : 'imp-c' + (index + 1),
           title: typeof item.title === 'string' && item.title.trim() ? item.title.slice(0, 120) : '第 ' + (index + 1) + ' 节',
           paragraphs: paragraphs,
         };
+        // EPUB pictures (name -> data URL) and the chapter's archive path / href are
+        // what image lines and cross-chapter links resolve against; keep them.
+        if (item.images && typeof item.images === 'object' && !Array.isArray(item.images)) {
+          const images = {};
+          Object.keys(item.images).forEach(function image(name) {
+            const value = item.images[name];
+            if (name && typeof value === 'string' && /^data:image\//i.test(value)) images[name] = value;
+          });
+          if (Object.keys(images).length) out.images = images;
+        }
+        if (typeof item.href === 'string' && item.href) out.href = item.href;
+        if (typeof item.path === 'string' && item.path) out.path = item.path;
+        return out;
       }).filter(Boolean);
       if (!chapters.length && !bodyOnDisk) return null;
       const cover = raw.cover && typeof raw.cover === 'object' ? raw.cover : LOCAL_COVERS[0];
@@ -1338,7 +1646,8 @@
         description: typeof raw.description === 'string' ? raw.description.slice(0, 500) : '从本地导入的文本，保存在此浏览器中。',
         tags: Array.isArray(raw.tags) ? raw.tags.filter(function tag(tag) { return typeof tag === 'string'; }).slice(0, 8) : ['本地导入'],
         source: 'local',
-        format: (raw.format === 'epub' || raw.format === 'markdown' || raw.format === 'txt')
+        format: (raw.format === 'epub' || raw.format === 'markdown' || raw.format === 'txt'
+          || raw.format === 'fb2' || raw.format === 'mobi')
           ? raw.format
           : (isEpubBook(raw)
               ? 'epub'
@@ -2006,10 +2315,11 @@
           lines.push(head);
 
           if (Array.isArray(tags) && tags.length) {
-            lines.push('  ' + tags.map(function tag(val) { return '#' + val; }).join(' '));
+            lines.push('  ' + tags.map(markdownHashtag).join(' '));
           }
           if (rev && rev.text) {
-            lines.push('  > ' + rev.text);
+            // Every line of a multi-line review stays inside the quote.
+            lines.push(String(rev.text).trim().split('\n').map(function quote(line) { return '  > ' + line; }).join('\n'));
           }
         });
         lines.push('');
@@ -2017,6 +2327,12 @@
 
       lines.push('— ' + translate('brand'));
       return lines.join('\n').trim() + '\n';
+    }
+
+    // A tag exported as a #hashtag: `science fiction` would otherwise read back as the
+    // tag #science followed by a word, so runs of whitespace become '-'.
+    function markdownHashtag(tag) {
+      return '#' + String(tag == null ? '' : tag).trim().replace(/\s+/g, '-');
     }
 
     function selectedAnnotationsMarkdown(selection, highlights, bookmarks, books, t) {
@@ -2059,7 +2375,7 @@
             lines.push('');
           }
           if (Array.isArray(entry.tags) && entry.tags.length) {
-            lines.push(entry.tags.map(function tag(value) { return '#' + value; }).join(' '));
+            lines.push(entry.tags.map(markdownHashtag).join(' '));
             lines.push('');
           }
           lines.push('— ' + (chapter ? chapter.title : '') + ' · ' + dateLabel(entry.createdAt));
@@ -2227,7 +2543,7 @@
             lines.push('');
           }
           if (Array.isArray(note.tags) && note.tags.length) {
-            lines.push(note.tags.map(function tag(value) { return '#' + value; }).join(' '));
+            lines.push(note.tags.map(markdownHashtag).join(' '));
             lines.push('');
           }
           lines.push('— ' + (chapter ? chapter.title : '') + ' · ' + dateLabel(note.createdAt));
@@ -2337,7 +2653,12 @@
           const item = raw.progress[id];
           if (!item || typeof item !== 'object') return;
           const known = bookById.get(id);
-          const chapterMarks = normalizeChapterMarks(item.chapterMarks, known ? known.chapters : []);
+          // A disk-backed book is stored without its chapters; its chapter ids ride
+          // along in `chapterIds`, and the resume marks are keyed by those.
+          const knownChapters = known && Array.isArray(known.chapters) && known.chapters.length
+            ? known.chapters
+            : (known && Array.isArray(known.chapterIds) ? known.chapterIds.map(function wrap(chapterId) { return { id: chapterId }; }) : []);
+          const chapterMarks = normalizeChapterMarks(item.chapterMarks, knownChapters);
           progress[id] = {
             chapterIndex: Math.max(0, Number(item.chapterIndex) || 0),
             percent: clamp(Number(item.percent) || 0, 0, 1),
@@ -2429,42 +2750,95 @@
       }).join('\n\n');
     }
 
-    // Reads that text back. Chapter ids come from the book's own `chapterIds` when the
-    // count still matches, so highlights and bookmarks keep pointing at the chapter
-    // the reader was on; otherwise they fall back to the ids the parser would have made.
-    function parseBookBodyText(text, ids, prefix) {
+    // Reads that text back. Chapter ids come from the book's own `chapterIds` only when
+    // the count still matches, so highlights and bookmarks keep pointing at the chapter
+    // the reader was on; when the file was edited into a different number of chapters,
+    // every chapter gets the id the parser would have made instead of a shifted one.
+    //
+    // Splitting rule (hostlib's parseBodyText mirrors it): an exactly empty line ends a
+    // paragraph and a `# title` line starts a chapter, except inside a block that may
+    // itself hold blank lines — so a code sample or an EPUB <pre> stays one paragraph:
+    //   - a fence: a line whose trimmed text starts with ``` or ~~~ opens it, the next
+    //     such line closes it;
+    //   - display math: a line starting with `$$` that is not a one-line `$$…$$` opens
+    //     it, the next line ending in `$$` closes it;
+    //   - an HTML container: a paragraph whose first line starts with <pre, <table,
+    //     <blockquote, <aside, <figure, <ul or <ol stays open until as many closing tags
+    //     of that name as opening ones have been seen.
+    const BODY_CONTAINER_PATTERN = /^<(pre|table|blockquote|aside|figure|ul|ol)\b/i;
+    // `options.plainParagraphs` (TXT/Markdown books): their import always splits at
+    // blank lines and never keeps an HTML container across one, so the container
+    // rule is off — otherwise a paragraph opening with <figure>/<pre>/<ul> swallows
+    // the following paragraphs (or chapters) on reload and highlight offsets shift.
+    function parseBookBodyText(text, ids, prefix, options) {
+      const htmlContainers = !(options && options.plainParagraphs);
       const raw = String(text || '').replace(/\r\n?/g, '\n').trim();
       if (!raw) return [];
       const known = Array.isArray(ids) ? ids : [];
       const collected = [];
       let current = null;
-      let inCodeBlock = false;
+      let lines = [];
+      let block = null;
+      let containerTag = '';
+      let containerDepth = 0;
+      function flush() {
+        const paragraph = lines.join('\n').trim();
+        lines = [];
+        if (paragraph && current) current.paragraphs.push(paragraph);
+      }
+      function countTag(line, pattern) {
+        const found = line.match(pattern);
+        return found ? found.length : 0;
+      }
       raw.split('\n').forEach(function each(line) {
         const trimmed = line.trim();
-        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
-          inCodeBlock = !inCodeBlock;
+        if (block) {
+          lines.push(line);
+          if (block === 'fence') {
+            if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) block = null;
+          } else if (block === 'math') {
+            if (trimmed.endsWith('$$')) block = null;
+          } else {
+            containerDepth += countTag(line, new RegExp('<' + containerTag + '\\b', 'gi'))
+              - countTag(line, new RegExp('</' + containerTag + '\\s*>', 'gi'));
+            if (containerDepth <= 0) block = null;
+          }
+          return;
         }
-        const heading = !inCodeBlock && /^#\s+(.+?)\s*$/.exec(line);
+        const heading = /^#\s+(.+?)\s*$/.exec(line);
         if (heading) {
-          current = { title: heading[1].slice(0, 120), lines: [] };
+          flush();
+          current = { title: heading[1].slice(0, 120), paragraphs: [] };
           collected.push(current);
           return;
         }
+        if (line === '') {
+          flush();
+          return;
+        }
         if (!current) {
-          current = { title: '正文', lines: [] };
+          current = { title: '正文', paragraphs: [] };
           collected.push(current);
         }
-        current.lines.push(line);
+        const opensContainer = htmlContainers && !lines.length && BODY_CONTAINER_PATTERN.exec(trimmed);
+        lines.push(line);
+        if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+          block = 'fence';
+        } else if (trimmed.startsWith('$$')) {
+          if (!isSelfClosedMath(trimmed)) block = 'math';
+        } else if (opensContainer) {
+          containerTag = opensContainer[1].toLowerCase();
+          containerDepth = countTag(line, new RegExp('<' + containerTag + '\\b', 'gi'))
+            - countTag(line, new RegExp('</' + containerTag + '\\s*>', 'gi'));
+          if (containerDepth > 0) block = 'container';
+        }
       });
-      const chapters = collected.map(function finish(chapter) {
-        const paragraphs = chapter.lines.join('\n').split(/\n{2,}/)
-          .map(function trim(part) { return part.trim(); })
-          .filter(Boolean);
-        return { title: chapter.title, paragraphs: paragraphs };
-      }).filter(function keep(chapter) { return chapter.paragraphs.length > 0; });
+      flush();
+      const chapters = collected.filter(function keep(chapter) { return chapter.paragraphs.length > 0; });
       const stem = prefix || 'imp';
+      const useKnown = known.length === chapters.length;
       return chapters.map(function identify(chapter, index) {
-        const knownId = known[index];
+        const knownId = useKnown ? known[index] : null;
         return {
           id: typeof knownId === 'string' && knownId ? knownId : stem + '-c' + (index + 1),
           title: chapter.title,
@@ -2494,6 +2868,16 @@
     // Books whose body never made it to disk. They are still in browser storage,
     // which is exactly the state the user was told would not happen — so name the
     // count instead of showing a cheerful "ready" toast over a half-local library.
+    // Books a restored backup carries bodies for. With a folder mounted they go to the
+    // folder right away; left in state they would only fit in localStorage, which a
+    // real library overflows, and the restore would be gone after a reload.
+    function restoredBodiesToPersist(state) {
+      const books = state && Array.isArray(state.customBooks) ? state.customBooks : [];
+      return books.filter(function withBody(book) {
+        return book && typeof book.id === 'string' && Array.isArray(book.chapters) && book.chapters.length > 0;
+      });
+    }
+
     function unwrittenBookIds(books, written) {
       const list = Array.isArray(books) ? books : [];
       const done = new Set(Array.isArray(written) ? written : []);
@@ -2522,7 +2906,11 @@
       return Object.assign({}, state, {
         customBooks: state.customBooks.map(function each(book) {
           if (!book || ids.indexOf(book.id) < 0) return book;
-          return Object.assign({}, book, { chaptersInFs: true, chapterIds: chapterIdsOf(book) });
+          // A body that is already on disk has no chapters in memory; its saved
+          // ids are the only link from highlights and bookmarks to its chapters.
+          const hasChapters = Array.isArray(book.chapters) && book.chapters.length > 0;
+          const chapterIds = hasChapters || !Array.isArray(book.chapterIds) ? chapterIdsOf(book) : book.chapterIds;
+          return Object.assign({}, book, { chaptersInFs: true, chapterIds: chapterIds });
         }),
       });
     }

@@ -13,6 +13,7 @@
     let fsDirectory = null;
     let fsSnapshotPending = null;
     let fsSnapshotWriting = false;
+    let fsSnapshotPromise = null;
 
     // Two APIs have to be there, not one: `showDirectoryPicker` is Chromium-only
     // (Safari and Firefox never shipped it), and a browser could expose the picker
@@ -217,11 +218,14 @@
     const fsSourceQueue = new Map();
     const fsInFlightWrites = new Map();
 
-    function fsRememberSource(bookId, fileName, bytesOrFile) {
+    // `isEpub` is the caller's own detection: a file recognised only by its
+    // `application/epub+zip` type has no `.epub` name to go by, and without its
+    // original the book has no body on disk at all.
+    function fsRememberSource(bookId, fileName, bytesOrFile, isEpub) {
       if (!bookId || !bytesOrFile) return false;
       const size = typeof bytesOrFile.size === 'number' ? bytesOrFile.size : (typeof bytesOrFile.length === 'number' ? bytesOrFile.length : 0);
       if (!size) return false;
-      if (!/\.epub$/i.test(String(fileName || ''))) return false;
+      if (isEpub !== true && !/\.epub$/i.test(String(fileName || ''))) return false;
       fsSourceQueue.set(bookId, bytesOrFile);
       fsSourceImages.delete(bookId);
       return true;
@@ -353,8 +357,15 @@
     async function fsWriteBookSource(directory, book) {
       const source = fsSourceQueue.get(book.id);
       if (!source) return false;
+      const name = fsSourceFileName(book, 'epub');
+      let existed = true;
       try {
-        const file = await directory.getFileHandle(fsSourceFileName(book, 'epub'), { create: true });
+        await directory.getFileHandle(name, { create: false });
+      } catch (error) {
+        existed = false;
+      }
+      try {
+        const file = await directory.getFileHandle(name, { create: true });
         const writable = await fsOpenWritable(file);
         try {
           await writable.write(source);
@@ -363,10 +374,27 @@
         }
         return true;
       } catch (error) {
+        // A file this failed write created is empty or partial; left behind it
+        // would pass for the book's original. One that was already there is
+        // untouched (writables only replace on close) and stays.
+        if (!existed) await fsRemoveEntry(directory, name, false);
         return false;
       } finally {
         fsSourceQueue.delete(book.id);
       }
+    }
+
+    // Whether any `--<id>.epub` is in the folder, under whatever title.
+    async function fsHasSourceFile(directory, id) {
+      const suffix = fsSourceSuffix(id);
+      try {
+        for await (const entry of directory.values()) {
+          if (entry.kind === 'file' && entry.name.endsWith(suffix)) return true;
+        }
+      } catch (error) {
+        return false;
+      }
+      return false;
     }
 
     // The original file only exists in the session that imported it. Renaming a
@@ -405,7 +433,10 @@
       const writePromise = (async function doWrite() {
         const directory = await fsBooksDirectory(true);
         if (isEpubBook(book)) {
-          await fsWriteBookSource(directory, book);
+          // The original is the whole body of an EPUB book. Reporting success
+          // without it would let the caller drop the only copy left in memory.
+          const wroteSource = await fsWriteBookSource(directory, book);
+          if (!wroteSource && !(await fsHasSourceFile(directory, book.id))) throw new Error('fs-io');
           const txtSuffix = fsBodySuffix(book.id);
           const mdSuffix = fsMdSuffix(book.id);
           for await (const entry of directory.values()) {
@@ -442,12 +473,21 @@
 
     async function fsWriteBookBody(book) {
       if (!book || !book.id) throw new Error('fs-no-book');
+      // A text book with no chapters in memory is metadata only (its body is on
+      // disk, or nowhere). Writing it would replace the real text with an empty
+      // file and delete its pictures.
+      if (!isEpubBook(book) && !(Array.isArray(book.chapters) && book.chapters.length)) {
+        throw new Error('fs-no-body');
+      }
       const writePromise = (async function doWrite() {
         const directory = await fsBooksDirectory(true);
         if (isEpubBook(book)) {
           await fsAdoptStaleSource(directory, book);
           const wroteSource = await fsWriteBookSource(directory, book);
           if (wroteSource) fsSourceImages.delete(book.id);
+          // No original written and none already there: the folder holds nothing
+          // this book can be read back from, so this is not a save.
+          if (!wroteSource && !(await fsHasSourceFile(directory, book.id))) throw new Error('fs-io');
           await fsRemoveEntry(directory, fsBookFileName(book.id));
           const txtSuffix = fsBodySuffix(book.id);
           const mdSuffix = fsMdSuffix(book.id);
@@ -717,21 +757,27 @@
       if (file) {
         const fileName = String((file && file.name) || bodyName || '');
         if (fileName.endsWith('.epub')) {
-          const raw = await file.getFile();
-          const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
-          const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
-          const parsed = await parseEpubBook((book && book.title) || fileName.replace(/\.epub$/i, ''), input, options);
-          if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
-            if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
-              parsed.chapters.forEach(function mapId(c, i) {
-                if (known[i]) c.id = known[i];
-              });
+          try {
+            const raw = await file.getFile();
+            const isStreamable = typeof Blob !== 'undefined' && (raw instanceof Blob || (typeof raw.slice === 'function' && typeof raw.size === 'number'));
+            const input = isStreamable ? raw : new Uint8Array(await raw.arrayBuffer());
+            const parsed = await parseEpubBook((book && book.title) || fileName.replace(/\.epub$/i, ''), input, options);
+            if (parsed && Array.isArray(parsed.chapters) && parsed.chapters.length) {
+              if (known && Array.isArray(known) && known.length === parsed.chapters.length) {
+                parsed.chapters.forEach(function mapId(c, i) {
+                  if (known[i]) c.id = known[i];
+                });
+              }
+              return parsed.chapters;
             }
-            return parsed.chapters;
+          } catch (err) {
+            return [];
           }
+          return [];
         }
         const text = await (await file.getFile()).text();
-        const chapters = parseBookBodyText(text, known);
+        const plainParagraphs = !!(book && typeof book === 'object' && (book.format === 'txt' || book.format === 'markdown'));
+        const chapters = parseBookBodyText(text, known, undefined, { plainParagraphs: plainParagraphs });
         if (!(options && options.skipImages === true)) await fsReadChapterImages(directory, chapters, id);
         return chapters;
       }
@@ -800,8 +846,9 @@
       const list = Array.isArray(books) ? books : [];
       if (!list.length) return done;
       const names = [];
+      let directory = null;
       try {
-        const directory = await fsBooksDirectory(false);
+        directory = await fsBooksDirectory(false);
         for await (const entry of directory.values()) {
           if (entry.kind === 'file' && /\.json$/i.test(entry.name)) names.push(entry.name);
         }
@@ -836,6 +883,97 @@
       return done;
     }
 
+    // Whether the mounted folder already holds a body this book can be read back
+    // from: its text, its original EPUB, or the JSON of older versions.
+    async function fsHasBookBody(book) {
+      const id = book && book.id;
+      if (!id || !fsDirectory) return false;
+      let directory = null;
+      try {
+        directory = await fsBooksDirectory(false);
+      } catch (error) {
+        return false;
+      }
+      const suffixes = [fsBodySuffix(id), fsMdSuffix(id), fsSourceSuffix(id)];
+      const legacy = fsBookFileName(id);
+      try {
+        for await (const entry of directory.values()) {
+          if (entry.kind !== 'file') continue;
+          if (entry.name === legacy) return true;
+          if (suffixes.some(function ends(suffix) { return entry.name.endsWith(suffix); })) return true;
+        }
+      } catch (error) {
+        return false;
+      }
+      return false;
+    }
+
+    async function fsCopyFile(fromDir, toDir, name) {
+      const source = await fromDir.getFileHandle(name, { create: false });
+      const data = await source.getFile();
+      const isBlob = typeof Blob !== 'undefined' && data instanceof Blob;
+      const content = isBlob ? data : new Uint8Array(await data.arrayBuffer());
+      const target = await toDir.getFileHandle(name, { create: true });
+      const writable = await fsOpenWritable(target);
+      try {
+        await writable.write(content);
+      } finally {
+        await writable.close();
+      }
+    }
+
+    // Copies every file one book has in another library folder (`fromRoot`, the
+    // folder's root handle) into the mounted one, byte for byte: the text, the
+    // original EPUB, the picture directory and any legacy JSON. A book whose body
+    // only exists on disk has nothing in memory to write, so moving to a new
+    // folder means carrying its files over. True when a readable body arrived.
+    async function fsCopyBookFromDirectory(fromRoot, book) {
+      const id = book && book.id;
+      if (!fromRoot || !id || !fsDirectory) return false;
+      let from = null;
+      try {
+        from = await fromRoot.getDirectoryHandle(FS_BOOKS_DIR, { create: false });
+      } catch (error) {
+        return false;
+      }
+      const to = await fsBooksDirectory(true);
+      const bodySuffixes = [fsBodySuffix(id), fsMdSuffix(id), fsSourceSuffix(id)];
+      const legacy = fsBookFileName(id);
+      const assetsSuffix = fsAssetsSuffix(id);
+      const entries = [];
+      for await (const entry of from.values()) entries.push({ kind: entry.kind, name: entry.name });
+      let copiedBody = false;
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        if (entry.kind === 'file') {
+          const isBody = entry.name === legacy || bodySuffixes.some(function ends(suffix) { return entry.name.endsWith(suffix); });
+          if (!isBody) continue;
+          await fsCopyFile(from, to, entry.name);
+          copiedBody = true;
+        } else if (entry.kind === 'directory' && entry.name.endsWith(assetsSuffix)) {
+          // Pictures are a cache the original can rebuild: best effort.
+          try {
+            const fromAssets = await from.getDirectoryHandle(entry.name, { create: false });
+            const toAssets = await to.getDirectoryHandle(entry.name, { create: true });
+            const pictures = [];
+            for await (const item of fromAssets.values()) {
+              if (item.kind === 'file') pictures.push(item.name);
+            }
+            for (let at = 0; at < pictures.length; at += 1) {
+              try {
+                await fsCopyFile(fromAssets, toAssets, pictures[at]);
+              } catch (error) {
+                /* one picture is not worth the book */
+              }
+            }
+          } catch (error) {
+            /* see above */
+          }
+        }
+      }
+      return copiedBody;
+    }
+
     // Everything one book can leave in the folder, for orphan detection: the text,
     // the original EPUB, the picture directory, and the JSON of older versions.
     async function fsListBookIds() {
@@ -850,33 +988,40 @@
 
     // Writes the metadata snapshot into the library folder. Writes coalesce: a
     // second save during an in-flight write replaces the pending payload instead
-    // of starting a competing writable stream on the same file.
-    async function fsWriteLibrarySnapshot(payload) {
-      if (!fsDirectory || !payload) return false;
+    // of starting a competing writable stream on the same file. Every caller gets
+    // the outcome of the last write the loop made — which carries its payload or
+    // a newer one — and a failed write still goes on to a payload that arrived
+    // meanwhile instead of dropping it.
+    function fsWriteLibrarySnapshot(payload) {
+      if (!fsDirectory || !payload) return Promise.resolve(false);
       fsSnapshotPending = payload;
-      if (fsSnapshotWriting) return true;
+      if (fsSnapshotWriting && fsSnapshotPromise) return fsSnapshotPromise;
       fsSnapshotWriting = true;
-      let wrote = false;
-      try {
-        while (fsSnapshotPending) {
-          const next = fsSnapshotPending;
-          fsSnapshotPending = null;
-          const file = await fsDirectory.getFileHandle(FS_SNAPSHOT_FILE, { create: true });
-          const writable = await fsOpenWritable(file);
-          try {
-            await writable.write(JSON.stringify(next));
-          } finally {
-            await writable.close();
+      fsSnapshotPromise = (async function writeLoop() {
+        let wrote = false;
+        try {
+          while (fsSnapshotPending) {
+            const next = fsSnapshotPending;
+            fsSnapshotPending = null;
+            try {
+              const file = await fsDirectory.getFileHandle(FS_SNAPSHOT_FILE, { create: true });
+              const writable = await fsOpenWritable(file);
+              try {
+                await writable.write(JSON.stringify(next));
+              } finally {
+                await writable.close();
+              }
+              wrote = true;
+            } catch (error) {
+              wrote = false;
+            }
           }
-          wrote = true;
+        } finally {
+          fsSnapshotWriting = false;
         }
-      } catch (error) {
-        fsSnapshotPending = null;
-        wrote = false;
-      } finally {
-        fsSnapshotWriting = false;
-      }
-      return wrote;
+        return wrote;
+      })();
+      return fsSnapshotPromise;
     }
 
     // Writes the snapshot and *waits*, so picking a folder that cannot be written
