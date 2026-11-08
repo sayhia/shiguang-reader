@@ -2431,7 +2431,7 @@
           h('div', { className: 'sr-header-actions' },
             h('button', {
               type: 'button',
-              className: 'sr-palette-trigger',
+              className: 'sr-palette-trigger' + (tab === 'shelf' ? ' sr-palette-trigger--shelf' : ''),
               onClick: function openPalette() { setPaletteOpen(true); },
               title: t('paletteTitle'),
               'aria-label': t('paletteTitle'),

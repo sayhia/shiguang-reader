@@ -258,7 +258,7 @@ window.__ModuleLoader__.load({
       noBooksToRead: '书架上暂无可用书籍',
       shortcutQuickResume: '快捷打开在读书籍（⌘O / Ctrl+O）',
       emptyShelfTitle: '书架还空着',
-      emptyShelfText: '导入一本 TXT、Markdown、EPUB 等格式的书，开始你的第一本书。',
+      emptyShelfText: '点击上方「导入第一本书」，或右上角「导入」，开始你的第一本书。',
       noSearchTitle: '没有找到这本书',
       noSearchText: '换一个关键词试试，或清空搜索。',
       clearSearch: '清空搜索',
@@ -1111,7 +1111,7 @@ window.__ModuleLoader__.load({
       noBooksToRead: 'No books available to read',
       shortcutQuickResume: 'Quick resume reading (⌘O / Ctrl+O)',
       emptyShelfTitle: 'Your shelf is still empty',
-      emptyShelfText: 'Import a TXT, Markdown, EPUB or other supported file to start your first book.',
+      emptyShelfText: 'Use “Import your first book” above, or “Import” at the top right, to start your first book.',
       noSearchTitle: 'No book found',
       noSearchText: 'Try another word, or clear the search.',
       clearSearch: 'Clear search',
@@ -2215,7 +2215,7 @@ body:has(.sr-reader) [data-rightbar-col]{
 .sr-daily-wrap{margin-top:17px;padding-top:15px;border-top:1px dashed color-mix(in oklab,var(--dsw-alias-border-l1) 85%,transparent);}
 .sr-daily-wrap .sr-daily-quote{margin-top:0;padding-top:0;border-top:0;}
 .sr-daily-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:1px;flex-wrap:wrap;row-gap:4px;}
-.sr-daily-action{display:inline-flex;align-items:center;gap:3px;padding:0;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:8.5px;cursor:pointer;opacity:.7;white-space:nowrap;}
+.sr-daily-action{display:inline-flex;align-items:center;gap:3px;padding:1px 2px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:10px;cursor:pointer;opacity:.82;white-space:nowrap;}
 .sr-daily-action:hover{color:var(--dsw-alias-brand-primary);opacity:1;}
 .sr-daily-quote p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;}
 .sr-daily-quote span:last-child{display:block;margin-top:6px;font-family:var(--dsw-font-sans);font-size:9.5px;letter-spacing:.03em;opacity:.72;}
@@ -2371,6 +2371,12 @@ body:has(.sr-reader) [data-rightbar-col]{
 }
 @keyframes sr-check-pop{0%{transform:scale(.7);}50%{transform:scale(1.15);}100%{transform:scale(1);}}
 .sr-book-row[data-selected="true"]{border-color:color-mix(in oklab,var(--dsw-alias-brand-primary) 46%,var(--dsw-alias-border-l1));background:color-mix(in oklab,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-1));box-shadow:0 0 0 1px color-mix(in oklab,var(--dsw-alias-brand-primary) 24%,transparent);}
+body[data-ds-dark-theme] .sr-shelf-select,
+body[data-ds-dark-theme] .sr-batch-dock,
+body[data-ds-dark-theme] .sr-select-bar{
+  background:color-mix(in oklab,var(--dsw-alias-bg-layer-2) 94%,transparent);
+  border-color:color-mix(in oklab,var(--dsw-alias-border-l2) 70%,transparent);
+}
 .sr-shelf-select,.sr-batch-dock,.sr-notes-tools .sr-select-bar{
   position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:95;
   display:inline-flex;align-items:center;justify-content:center;gap:0;
@@ -4744,6 +4750,7 @@ aside.sr-aside-note{
   .sr-header-inner{gap:14px;height:60px;}
   .sr-nav-item{padding:0 10px;font-size:11.5px;}
   .sr-search input{width:150px;}
+  .sr-palette-trigger--shelf{display:none;}
   .sr-hero-grid{grid-template-columns:1fr;}
   .sr-hero-main{grid-template-columns:minmax(0,1fr) 280px;min-height:250px;padding:26px;gap:20px;}
   .sr-goal-card{min-height:0;display:grid;grid-template-columns:1fr auto;column-gap:16px;align-items:center;}
@@ -4793,7 +4800,7 @@ aside.sr-aside-note{
   .sr-cover-title--xlong{font-size:10.5px;letter-spacing:.04em;}
   .sr-cover-title--latin{font-size:12px;max-height:60%;}
   .sr-cover-author{font-size:7px;}
-  .sr-cover-badge{font-size:6.5px;padding:2px 4px;}
+  .sr-cover-badge{font-size:8px;padding:2px 5px;}
   .sr-book-title{font-size:12.5px;}
   .sr-page-head{display:block;margin-bottom:17px;}
   .sr-page-head-stat{display:none;}
@@ -4920,12 +4927,12 @@ aside.sr-aside-note{
   .sr-import-progress{left:0;top:calc(100% + 6px);width:calc(100vw - 32px);}
 }
 @media (max-width:600px){
-  .sr-shelf-select-links .sr-link-btn{display:none;}
-  .sr-shelf-select-links .sr-select-all{display:inline-flex;}
-  .sr-bulk-action span,.sr-bulk-more span{display:none;}
-  .sr-bulk-action,.sr-bulk-more{width:28px;padding:0;justify-content:center;}
+  .sr-batch-dock-inner{flex-wrap:wrap;gap:4px;row-gap:4px;}
+  .sr-shelf-select-links .sr-link-btn{padding:0 5px;font-size:10px;}
+  .sr-shelf-select-actions{order:3;width:100%;justify-content:space-between;gap:4px;}
+  .sr-bulk-action,.sr-bulk-more{height:32px;padding:0 8px;font-size:10.5px;}
+  .sr-bulk-done{order:2;margin-left:auto;height:32px;}
   .sr-batch-divider{display:none;}
-  .sr-batch-dock-inner{gap:4px;}
   .sr-section-head{flex-wrap:wrap;align-items:flex-start;gap:10px 12px;}
   .sr-section-head>div:first-child{flex:1 1 100%;min-width:0;}
   .sr-shelf-head-tools{width:100%;justify-content:flex-start;gap:6px;}
@@ -24614,7 +24621,7 @@ aside.sr-aside-note{
           h('div', { className: 'sr-header-actions' },
             h('button', {
               type: 'button',
-              className: 'sr-palette-trigger',
+              className: 'sr-palette-trigger' + (tab === 'shelf' ? ' sr-palette-trigger--shelf' : ''),
               onClick: function openPalette() { setPaletteOpen(true); },
               title: t('paletteTitle'),
               'aria-label': t('paletteTitle'),
