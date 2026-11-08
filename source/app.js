@@ -135,6 +135,7 @@
       const scrollRef = useRef(null);
       const shelfUiMemory = useRef({ filter: 'all', tagFilters: [], tagMatch: 'any' });
       const shelfScrollMemory = useRef(0);
+      const shelfRestoreScrollRef = useRef(0);
       const tabRef = useRef(tab);
       useEffect(function syncTabRef() { tabRef.current = tab; }, [tab]);
       const fileRef = useRef(null);
@@ -1235,12 +1236,9 @@
       const exitReader = useCallback(function exit() {
         setReader(null);
         setTab('shelf');
-        const restoreScroll = shelfScrollMemory.current;
-        if (restoreScroll > 0) {
-          window.requestAnimationFrame(function restoreShelfScroll() {
-            if (scrollRef.current) scrollRef.current.scrollTop = restoreScroll;
-          });
-        }
+        // The remounted shelf restores the remembered position itself: its virtual
+        // spacer must be sized for that scroll position before the write sticks.
+        shelfRestoreScrollRef.current = shelfScrollMemory.current;
         try {
           const app = document.querySelector('.sr-app');
           if (app) {
@@ -2395,10 +2393,9 @@
               h('div', { className: 'sr-import-progress-hint' }, t('importProgressHint')),
             ) : null,
           ),
-          h('div', {
+          h('nav', {
             className: 'sr-nav',
-            role: 'tablist',
-            'aria-label': t('brand'),
+            'aria-label': t('mainNav'),
             onKeyDown: function navKeys(event) {
               const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
               if (keys.indexOf(event.key) < 0) return;
@@ -2422,8 +2419,7 @@
                 key: item.id,
                 type: 'button',
                 className: 'sr-nav-item',
-                role: 'tab',
-                'aria-selected': tab === item.id,
+                'aria-current': tab === item.id ? 'page' : undefined,
                 tabIndex: tab === item.id ? 0 : -1,
                 onClick: function switchTab() { setTab(item.id); },
               },
@@ -2508,6 +2504,8 @@
           initialTagFilters: shelfUiMemory.current.tagFilters,
           initialTagMatch: shelfUiMemory.current.tagMatch,
           onShelfUiChange: function rememberShelfUi(memory) { shelfUiMemory.current = memory; },
+          initialScrollTop: shelfRestoreScrollRef.current,
+          onShelfScrollRestored: function consumeShelfRestore() { shelfRestoreScrollRef.current = 0; },
           onSetFinished: setFinishedBulk,
           onSetShelved: setShelvedBulk,
           onSetWishlist: setWishlistBulk,

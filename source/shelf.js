@@ -252,6 +252,7 @@
             props.onContinue(book);
           }
         },
+        'aria-keyshortcuts': 'Space',
         'aria-label': book.title + ' · ' + book.author,
       },
         h('div', { className: 'sr-book-cover-wrap' },
@@ -314,6 +315,7 @@
             props.onContinue(book);
           }
         },
+        'aria-keyshortcuts': 'Space',
         'aria-label': book.title + ' · ' + book.author,
       },
         selecting ? h('span', { className: 'sr-book-check sr-book-check--row', 'aria-hidden': 'true' }, picked ? h(Icon, { name: 'check', size: 11 }) : null) : null,
@@ -575,6 +577,26 @@
         const scrollEl = el.closest('.sr-scroll');
         if (!scrollEl) return undefined;
 
+        // Restore a shelf scroll position once, on the first measure after a reader
+        // round-trip: the virtual spacer has to be sized for that position first,
+        // otherwise the write is clamped and the position is lost.
+        let pendingRestore = Math.max(0, Number(props.initialScrollTop) || 0);
+        function consumeRestore() {
+          if (!(pendingRestore > 0)) return;
+          const target = pendingRestore;
+          pendingRestore = 0;
+          if (typeof props.onShelfScrollRestored === 'function') props.onShelfScrollRestored();
+          let attempts = 0;
+          const applyRestore = function applyRestore() {
+            if (!scrollEl || attempts > 10) return;
+            attempts += 1;
+            if (Math.abs(scrollEl.scrollTop - target) <= 2) return;
+            scrollEl.scrollTop = target;
+            window.requestAnimationFrame(applyRestore);
+          };
+          window.requestAnimationFrame(applyRestore);
+        }
+
         let rafId = null;
         function measure() {
           rafId = null;
@@ -586,12 +608,13 @@
               lastWindowRef.current = next;
               setVirtualWindow(next);
             }
+            consumeRestore();
             return;
           }
 
           const rect = el.getBoundingClientRect();
           const sRect = scrollEl.getBoundingClientRect();
-          const scrollTop = scrollEl.scrollTop;
+          const scrollTop = pendingRestore > 0 ? pendingRestore : scrollEl.scrollTop;
           const viewportH = scrollEl.clientHeight || window.innerHeight || 900;
           const gridTop = Math.max(0, rect.top - sRect.top + scrollTop);
           const gridW = el.clientWidth || 1000;
@@ -599,7 +622,8 @@
 
           let next;
           if (view === 'list') {
-            const rowH = 61;
+            const sampleRow = el.querySelector('.sr-book-row');
+            const rowH = (sampleRow ? sampleRow.getBoundingClientRect().height : 76) + 7;
             const totalItems = total + 1;
             const startRow = Math.max(0, Math.floor(scrollY / rowH) - 4);
             const endRow = Math.min(totalItems, Math.ceil((scrollY + viewportH) / rowH) + 4);
@@ -616,7 +640,9 @@
             const minW = gridW < 500 ? 118 : 138;
             const cols = Math.max(1, Math.floor((gridW + gapX) / (minW + gapX)));
             const colW = (gridW - (cols - 1) * gapX) / cols;
-            const cardH = Math.round(colW * (4 / 3) + 76);
+            const sampleCard = el.querySelector('.sr-book-card');
+            const measuredCardH = sampleCard ? sampleCard.getBoundingClientRect().height : 0;
+            const cardH = measuredCardH > 0 ? measuredCardH : Math.round(colW * (4 / 3) + 100);
             const rowH = cardH + gapY;
 
             const totalItems = total + 1;
@@ -639,6 +665,7 @@
             lastWindowRef.current = next;
             setVirtualWindow(next);
           }
+          consumeRestore();
         }
 
         function onScroll() {
@@ -1001,10 +1028,8 @@
             h('span', { className: 'sr-greeting-dot', 'aria-hidden': 'true' }, '·'),
             h('span', null, t(greetingKey())),
           ),
-          libraryEmpty ? null : h('span', { className: 'sr-greeting-goal' },
-            todayGoal.done
-              ? t('todayGoalDone')
-              : t('todayGoal') + ' · ' + fill(t('goalDailyRemain'), { n: Math.ceil(todayGoalRemainSeconds / 60) }),
+          libraryEmpty || todayGoal.done ? null : h('span', { className: 'sr-greeting-goal' },
+            t('todayGoal') + ' · ' + fill(t('goalDailyRemain'), { n: Math.ceil(todayGoalRemainSeconds / 60) }),
           ),
         ),
         h('section', null,
@@ -1284,7 +1309,7 @@
                 h('div', { className: 'sr-shelf-select-links' },
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-all',
                     onClick: function selectAll() {
                       lastSelectedRef.current = null;
                       setSelected(Array.from(new Set(selected.concat(visibleIds))));
@@ -1292,7 +1317,7 @@
                   }, t('selectAll')),
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-invert',
                     disabled: !visibleIds.length,
                     onClick: function invert() {
                       lastSelectedRef.current = null;
@@ -1301,7 +1326,7 @@
                   }, t('invertSelection')),
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-clear',
                     disabled: !selected.length,
                     onClick: function clear() {
                       lastSelectedRef.current = null;
@@ -1317,6 +1342,7 @@
                   className: 'sr-bulk-action',
                   disabled: !selectedVisible.length,
                   'data-active': selectedAllFinished ? 'true' : 'false',
+                  'aria-label': selectedAllFinished ? t('markReading') : t('markFinished'),
                   onClick: function toggleFinished() {
                     if (typeof props.onSetFinished !== 'function') return;
                     props.onSetFinished(selectedVisible, !selectedAllFinished);
@@ -1328,6 +1354,7 @@
                   className: 'sr-bulk-action',
                   disabled: !selectedVisible.length,
                   'data-active': selectedAllShelved ? 'true' : 'false',
+                  'aria-label': selectedAllShelved ? t('unshelveBook') : t('shelveBook'),
                   onClick: function toggleBulkShelved() {
                     if (typeof props.onSetShelved !== 'function') return;
                     props.onSetShelved(selectedVisible, !selectedAllShelved);
@@ -1338,6 +1365,7 @@
                   type: 'button',
                   className: 'sr-bulk-action',
                   'aria-expanded': bulkTagOpen ? 'true' : 'false',
+                  'aria-label': t('bulkTag'),
                   'data-active': bulkTagOpen ? 'true' : 'false',
                   disabled: !selectedVisible.length,
                   onClick: function toggleTagRow() {
@@ -1352,6 +1380,7 @@
                   className: 'sr-bulk-more',
                   'aria-haspopup': 'menu',
                   'aria-expanded': bulkMenuOpen ? 'true' : 'false',
+                  'aria-label': t('moreActions'),
                   disabled: !selectedVisible.length,
                   onClick: function toggleMenu() {
                     setBulkMenuOpen(!bulkMenuOpen);
@@ -1535,14 +1564,14 @@
           h('div', { className: 'sr-shelf-footer' },
             h('span', null, t('savedLocally')),
             h('div', { className: 'sr-shelf-footer-actions' },
-              h('button', { type: 'button', className: 'sr-text-btn', onClick: function exp() { exportBooklist(); } },
+              books.length ? h('button', { type: 'button', className: 'sr-text-btn', onClick: function exp() { exportBooklist(); } },
                 h(Icon, { name: 'list', size: 11 }),
                 h('span', null, t('exportBooklist')),
-              ),
-              h('button', { type: 'button', className: 'sr-text-btn', onClick: function cp() { copyBooklist(); } },
+              ) : null,
+              books.length ? h('button', { type: 'button', className: 'sr-text-btn', onClick: function cp() { copyBooklist(); } },
                 h(Icon, { name: 'copy', size: 11 }),
                 h('span', null, t('copyBooklist')),
-              ),
+              ) : null,
               h('button', { type: 'button', className: 'sr-text-btn', onClick: props.onExportBackup },
                 h(Icon, { name: 'download', size: 11 }),
                 h('span', null, t('exportBackup')),

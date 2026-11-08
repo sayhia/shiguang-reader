@@ -32,6 +32,7 @@ window.__ModuleLoader__.load({
     const ZH = {
       brand: '拾光阅读',
       brandSub: '把日子读慢一点',
+      mainNav: '主导航',
       navShelf: '书架',
       navNotes: '笔记',
       navStats: '统计',
@@ -257,7 +258,7 @@ window.__ModuleLoader__.load({
       noBooksToRead: '书架上暂无可用书籍',
       shortcutQuickResume: '快捷打开在读书籍（⌘O / Ctrl+O）',
       emptyShelfTitle: '书架还空着',
-      emptyShelfText: '导入一本 TXT、Markdown 或 EPUB，开始你的第一本书。',
+      emptyShelfText: '导入一本 TXT、Markdown、EPUB 等格式的书，开始你的第一本书。',
       noSearchTitle: '没有找到这本书',
       noSearchText: '换一个关键词试试，或清空搜索。',
       clearSearch: '清空搜索',
@@ -349,7 +350,7 @@ window.__ModuleLoader__.load({
       bookTagRenamed: '书籍标签已重命名',
       bookTagDeleted: '书籍标签已删除',
       paletteTitle: '命令面板',
-      paletteTrigger: '搜索',
+      paletteTrigger: '跳转',
       palettePlaceholder: '搜索书籍、章节、摘录、#标签，或输入命令…',
       paletteEmpty: '没有找到匹配的内容',
       paletteRecent: '继续阅读',
@@ -884,6 +885,7 @@ window.__ModuleLoader__.load({
     const EN = {
       brand: 'Shiguang Reader',
       brandSub: 'Read slowly, live deeply',
+      mainNav: 'Main navigation',
       navShelf: 'Shelf',
       navNotes: 'Notes',
       navStats: 'Stats',
@@ -1109,7 +1111,7 @@ window.__ModuleLoader__.load({
       noBooksToRead: 'No books available to read',
       shortcutQuickResume: 'Quick resume reading (⌘O / Ctrl+O)',
       emptyShelfTitle: 'Your shelf is still empty',
-      emptyShelfText: 'Import a TXT, Markdown or EPUB file to start your first book.',
+      emptyShelfText: 'Import a TXT, Markdown, EPUB or other supported file to start your first book.',
       noSearchTitle: 'No book found',
       noSearchText: 'Try another word, or clear the search.',
       clearSearch: 'Clear search',
@@ -1201,7 +1203,7 @@ window.__ModuleLoader__.load({
       bookTagRenamed: 'Book tag renamed',
       bookTagDeleted: 'Book tag deleted',
       paletteTitle: 'Command palette',
-      paletteTrigger: 'Search',
+      paletteTrigger: 'Jump',
       palettePlaceholder: 'Search books, chapters, excerpts, #tags, or type a command…',
       paletteEmpty: 'Nothing matches that',
       paletteRecent: 'Continue reading',
@@ -2580,7 +2582,10 @@ body:has(.sr-reader) [data-rightbar-col]{
 .sr-book-progress{margin-top:auto;padding-top:8px;display:flex;align-items:center;gap:7px;}
 .sr-book-track{height:2px;border-radius:2px;flex:1;background:color-mix(in oklab,var(--dsw-alias-border-l1) 70%,transparent);overflow:hidden;}
 .sr-book-fill{display:block;height:100%;border-radius:inherit;background:var(--sr-accent-strong);opacity:.85;}
-.sr-book-pct{font-size:9.5px;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;min-width:22px;text-align:right;opacity:.84;}
+body[data-ds-dark-theme] .sr-book-track{background:rgba(255,255,255,.16);}
+body[data-ds-dark-theme] .sr-book-fill{background:#7cc0a2;opacity:.95;}
+body[data-ds-dark-theme] .sr-goal-daily-fill{background:#7cc0a2;}
+.sr-book-pct{display:inline-flex;align-items:center;justify-content:flex-end;min-height:14px;font-size:9.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;min-width:22px;text-align:right;opacity:.84;}
 .sr-cover{
   position:relative;display:block;width:100%;aspect-ratio:3/4;overflow:hidden;isolation:isolate;
   border-radius:3px 9px 9px 3px;
@@ -4915,6 +4920,12 @@ aside.sr-aside-note{
   .sr-import-progress{left:0;top:calc(100% + 6px);width:calc(100vw - 32px);}
 }
 @media (max-width:600px){
+  .sr-shelf-select-links .sr-link-btn{display:none;}
+  .sr-shelf-select-links .sr-select-all{display:inline-flex;}
+  .sr-bulk-action span,.sr-bulk-more span{display:none;}
+  .sr-bulk-action,.sr-bulk-more{width:28px;padding:0;justify-content:center;}
+  .sr-batch-divider{display:none;}
+  .sr-batch-dock-inner{gap:4px;}
   .sr-section-head{flex-wrap:wrap;align-items:flex-start;gap:10px 12px;}
   .sr-section-head>div:first-child{flex:1 1 100%;min-width:0;}
   .sr-shelf-head-tools{width:100%;justify-content:flex-start;gap:6px;}
@@ -13368,6 +13379,7 @@ aside.sr-aside-note{
             props.onContinue(book);
           }
         },
+        'aria-keyshortcuts': 'Space',
         'aria-label': book.title + ' · ' + book.author,
       },
         h('div', { className: 'sr-book-cover-wrap' },
@@ -13430,6 +13442,7 @@ aside.sr-aside-note{
             props.onContinue(book);
           }
         },
+        'aria-keyshortcuts': 'Space',
         'aria-label': book.title + ' · ' + book.author,
       },
         selecting ? h('span', { className: 'sr-book-check sr-book-check--row', 'aria-hidden': 'true' }, picked ? h(Icon, { name: 'check', size: 11 }) : null) : null,
@@ -13691,6 +13704,26 @@ aside.sr-aside-note{
         const scrollEl = el.closest('.sr-scroll');
         if (!scrollEl) return undefined;
 
+        // Restore a shelf scroll position once, on the first measure after a reader
+        // round-trip: the virtual spacer has to be sized for that position first,
+        // otherwise the write is clamped and the position is lost.
+        let pendingRestore = Math.max(0, Number(props.initialScrollTop) || 0);
+        function consumeRestore() {
+          if (!(pendingRestore > 0)) return;
+          const target = pendingRestore;
+          pendingRestore = 0;
+          if (typeof props.onShelfScrollRestored === 'function') props.onShelfScrollRestored();
+          let attempts = 0;
+          const applyRestore = function applyRestore() {
+            if (!scrollEl || attempts > 10) return;
+            attempts += 1;
+            if (Math.abs(scrollEl.scrollTop - target) <= 2) return;
+            scrollEl.scrollTop = target;
+            window.requestAnimationFrame(applyRestore);
+          };
+          window.requestAnimationFrame(applyRestore);
+        }
+
         let rafId = null;
         function measure() {
           rafId = null;
@@ -13702,12 +13735,13 @@ aside.sr-aside-note{
               lastWindowRef.current = next;
               setVirtualWindow(next);
             }
+            consumeRestore();
             return;
           }
 
           const rect = el.getBoundingClientRect();
           const sRect = scrollEl.getBoundingClientRect();
-          const scrollTop = scrollEl.scrollTop;
+          const scrollTop = pendingRestore > 0 ? pendingRestore : scrollEl.scrollTop;
           const viewportH = scrollEl.clientHeight || window.innerHeight || 900;
           const gridTop = Math.max(0, rect.top - sRect.top + scrollTop);
           const gridW = el.clientWidth || 1000;
@@ -13715,7 +13749,8 @@ aside.sr-aside-note{
 
           let next;
           if (view === 'list') {
-            const rowH = 61;
+            const sampleRow = el.querySelector('.sr-book-row');
+            const rowH = (sampleRow ? sampleRow.getBoundingClientRect().height : 76) + 7;
             const totalItems = total + 1;
             const startRow = Math.max(0, Math.floor(scrollY / rowH) - 4);
             const endRow = Math.min(totalItems, Math.ceil((scrollY + viewportH) / rowH) + 4);
@@ -13732,7 +13767,9 @@ aside.sr-aside-note{
             const minW = gridW < 500 ? 118 : 138;
             const cols = Math.max(1, Math.floor((gridW + gapX) / (minW + gapX)));
             const colW = (gridW - (cols - 1) * gapX) / cols;
-            const cardH = Math.round(colW * (4 / 3) + 76);
+            const sampleCard = el.querySelector('.sr-book-card');
+            const measuredCardH = sampleCard ? sampleCard.getBoundingClientRect().height : 0;
+            const cardH = measuredCardH > 0 ? measuredCardH : Math.round(colW * (4 / 3) + 100);
             const rowH = cardH + gapY;
 
             const totalItems = total + 1;
@@ -13755,6 +13792,7 @@ aside.sr-aside-note{
             lastWindowRef.current = next;
             setVirtualWindow(next);
           }
+          consumeRestore();
         }
 
         function onScroll() {
@@ -14117,10 +14155,8 @@ aside.sr-aside-note{
             h('span', { className: 'sr-greeting-dot', 'aria-hidden': 'true' }, '·'),
             h('span', null, t(greetingKey())),
           ),
-          libraryEmpty ? null : h('span', { className: 'sr-greeting-goal' },
-            todayGoal.done
-              ? t('todayGoalDone')
-              : t('todayGoal') + ' · ' + fill(t('goalDailyRemain'), { n: Math.ceil(todayGoalRemainSeconds / 60) }),
+          libraryEmpty || todayGoal.done ? null : h('span', { className: 'sr-greeting-goal' },
+            t('todayGoal') + ' · ' + fill(t('goalDailyRemain'), { n: Math.ceil(todayGoalRemainSeconds / 60) }),
           ),
         ),
         h('section', null,
@@ -14400,7 +14436,7 @@ aside.sr-aside-note{
                 h('div', { className: 'sr-shelf-select-links' },
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-all',
                     onClick: function selectAll() {
                       lastSelectedRef.current = null;
                       setSelected(Array.from(new Set(selected.concat(visibleIds))));
@@ -14408,7 +14444,7 @@ aside.sr-aside-note{
                   }, t('selectAll')),
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-invert',
                     disabled: !visibleIds.length,
                     onClick: function invert() {
                       lastSelectedRef.current = null;
@@ -14417,7 +14453,7 @@ aside.sr-aside-note{
                   }, t('invertSelection')),
                   h('button', {
                     type: 'button',
-                    className: 'sr-link-btn',
+                    className: 'sr-link-btn sr-select-clear',
                     disabled: !selected.length,
                     onClick: function clear() {
                       lastSelectedRef.current = null;
@@ -14433,6 +14469,7 @@ aside.sr-aside-note{
                   className: 'sr-bulk-action',
                   disabled: !selectedVisible.length,
                   'data-active': selectedAllFinished ? 'true' : 'false',
+                  'aria-label': selectedAllFinished ? t('markReading') : t('markFinished'),
                   onClick: function toggleFinished() {
                     if (typeof props.onSetFinished !== 'function') return;
                     props.onSetFinished(selectedVisible, !selectedAllFinished);
@@ -14444,6 +14481,7 @@ aside.sr-aside-note{
                   className: 'sr-bulk-action',
                   disabled: !selectedVisible.length,
                   'data-active': selectedAllShelved ? 'true' : 'false',
+                  'aria-label': selectedAllShelved ? t('unshelveBook') : t('shelveBook'),
                   onClick: function toggleBulkShelved() {
                     if (typeof props.onSetShelved !== 'function') return;
                     props.onSetShelved(selectedVisible, !selectedAllShelved);
@@ -14454,6 +14492,7 @@ aside.sr-aside-note{
                   type: 'button',
                   className: 'sr-bulk-action',
                   'aria-expanded': bulkTagOpen ? 'true' : 'false',
+                  'aria-label': t('bulkTag'),
                   'data-active': bulkTagOpen ? 'true' : 'false',
                   disabled: !selectedVisible.length,
                   onClick: function toggleTagRow() {
@@ -14468,6 +14507,7 @@ aside.sr-aside-note{
                   className: 'sr-bulk-more',
                   'aria-haspopup': 'menu',
                   'aria-expanded': bulkMenuOpen ? 'true' : 'false',
+                  'aria-label': t('moreActions'),
                   disabled: !selectedVisible.length,
                   onClick: function toggleMenu() {
                     setBulkMenuOpen(!bulkMenuOpen);
@@ -14651,14 +14691,14 @@ aside.sr-aside-note{
           h('div', { className: 'sr-shelf-footer' },
             h('span', null, t('savedLocally')),
             h('div', { className: 'sr-shelf-footer-actions' },
-              h('button', { type: 'button', className: 'sr-text-btn', onClick: function exp() { exportBooklist(); } },
+              books.length ? h('button', { type: 'button', className: 'sr-text-btn', onClick: function exp() { exportBooklist(); } },
                 h(Icon, { name: 'list', size: 11 }),
                 h('span', null, t('exportBooklist')),
-              ),
-              h('button', { type: 'button', className: 'sr-text-btn', onClick: function cp() { copyBooklist(); } },
+              ) : null,
+              books.length ? h('button', { type: 'button', className: 'sr-text-btn', onClick: function cp() { copyBooklist(); } },
                 h(Icon, { name: 'copy', size: 11 }),
                 h('span', null, t('copyBooklist')),
-              ),
+              ) : null,
               h('button', { type: 'button', className: 'sr-text-btn', onClick: props.onExportBackup },
                 h(Icon, { name: 'download', size: 11 }),
                 h('span', null, t('exportBackup')),
@@ -22278,6 +22318,7 @@ aside.sr-aside-note{
       const scrollRef = useRef(null);
       const shelfUiMemory = useRef({ filter: 'all', tagFilters: [], tagMatch: 'any' });
       const shelfScrollMemory = useRef(0);
+      const shelfRestoreScrollRef = useRef(0);
       const tabRef = useRef(tab);
       useEffect(function syncTabRef() { tabRef.current = tab; }, [tab]);
       const fileRef = useRef(null);
@@ -23378,12 +23419,9 @@ aside.sr-aside-note{
       const exitReader = useCallback(function exit() {
         setReader(null);
         setTab('shelf');
-        const restoreScroll = shelfScrollMemory.current;
-        if (restoreScroll > 0) {
-          window.requestAnimationFrame(function restoreShelfScroll() {
-            if (scrollRef.current) scrollRef.current.scrollTop = restoreScroll;
-          });
-        }
+        // The remounted shelf restores the remembered position itself: its virtual
+        // spacer must be sized for that scroll position before the write sticks.
+        shelfRestoreScrollRef.current = shelfScrollMemory.current;
         try {
           const app = document.querySelector('.sr-app');
           if (app) {
@@ -24538,10 +24576,9 @@ aside.sr-aside-note{
               h('div', { className: 'sr-import-progress-hint' }, t('importProgressHint')),
             ) : null,
           ),
-          h('div', {
+          h('nav', {
             className: 'sr-nav',
-            role: 'tablist',
-            'aria-label': t('brand'),
+            'aria-label': t('mainNav'),
             onKeyDown: function navKeys(event) {
               const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
               if (keys.indexOf(event.key) < 0) return;
@@ -24565,8 +24602,7 @@ aside.sr-aside-note{
                 key: item.id,
                 type: 'button',
                 className: 'sr-nav-item',
-                role: 'tab',
-                'aria-selected': tab === item.id,
+                'aria-current': tab === item.id ? 'page' : undefined,
                 tabIndex: tab === item.id ? 0 : -1,
                 onClick: function switchTab() { setTab(item.id); },
               },
@@ -24651,6 +24687,8 @@ aside.sr-aside-note{
           initialTagFilters: shelfUiMemory.current.tagFilters,
           initialTagMatch: shelfUiMemory.current.tagMatch,
           onShelfUiChange: function rememberShelfUi(memory) { shelfUiMemory.current = memory; },
+          initialScrollTop: shelfRestoreScrollRef.current,
+          onShelfScrollRestored: function consumeShelfRestore() { shelfRestoreScrollRef.current = 0; },
           onSetFinished: setFinishedBulk,
           onSetShelved: setShelvedBulk,
           onSetWishlist: setWishlistBulk,
